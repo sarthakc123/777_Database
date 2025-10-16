@@ -1,0 +1,10 @@
+# Core
+streamlit
+pandas
+numpy
+
+# Optional but recommended (file→SMILES + previews)
+rdkit
+pillow
+SQLAlchemy>=2.0
+psycopg2-binary>=2.9
