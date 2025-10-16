@@ -165,7 +165,7 @@ def insert_reaction_with_sets(
         rid: str, initials: str,
         s_smi: Optional[str], e_smi: Optional[str], c_smi: Optional[str],
         expected_smi: Optional[str], rxn_scale_mol: Optional[float],
-        oligomer_type: Optional[str], sets: List[dict]
+        oligomer_type: Optional[str], sets: List[dict],comments: Optional[str]=None
 ) -> bool:
     """Insert reaction and condition sets"""
 
@@ -180,10 +180,11 @@ def insert_reaction_with_sets(
             "oligomer_type": oligomer_type,
             "expected_smiles": expected_smi,
             "rxn_scale_mol": rxn_scale_mol,
-            "created_at": datetime.utcnow().isoformat()
+            "created_at": datetime.utcnow().isoformat(),
+            "comments": comments
         }
 
-        st.write("Debug: Inserting reaction ", reaction_data)  # Debug line
+        #st.write("Debug: Inserting reaction ", reaction_data)  # Debug line
         reaction_result = api_request("POST", "reactions", reaction_data)
 
         if not reaction_result:
@@ -203,7 +204,7 @@ def insert_reaction_with_sets(
                 "solvent": cs["solv"]
             }
 
-            st.write(f"Debug: Inserting condition set {cs['set_index']}:", condition_data)  # Debug line
+            #st.write(f"Debug: Inserting condition set {cs['set_index']}:", condition_data)  # Debug line
             condition_result = api_request("POST", "reaction_conditions", condition_data)
 
             if not condition_result:
@@ -400,6 +401,8 @@ with st.form("reaction_form", clear_on_submit=False):
     st.markdown("---")
     expected_smi = canonicalize_smiles(st.text_input("Expected compound SMILES"))
     rxn_scale_mol = st.number_input("RXN_Scale (mol) *", min_value=0.0, value = None, step=0.001, format="%f")
+    # Comments (free text)
+    comments = st.text_area("Comments (optional)", help="Notes, observations, yields, deviations, etc.")
 
     # Validation
     errors = []
@@ -441,7 +444,7 @@ st.markdown("---")
 st.subheader("Recent submissions (consolidated)")
 
 # 1) Fetch raw tables
-rx_cols = "id,chemist_initials,oligomer_type,s_block_smiles,e_block_smiles,c_block_smiles,expected_smiles,rxn_scale_mol,created_at"
+rx_cols = "id,chemist_initials,oligomer_type,s_block_smiles,e_block_smiles,c_block_smiles,expected_smiles,rxn_scale_mol,comments,created_at"
 rc_cols = "reaction_id,set_index,coupling_type,temperature_c,condition,base,time_hours,solvent"
 
 rx = api_request("GET", "reactions", params={"select": rx_cols, "order": "created_at.desc", "limit": 200}) or []
@@ -474,7 +477,7 @@ else:
     cols = [
         "id","chemist_initials","oligomer_type","set_index","coupling_type",
         "temperature_c","base","solvent","time_hours","condition",
-        "rxn_scale_mol","created_at","s_block_smiles","e_block_smiles","c_block_smiles","expected_smiles"
+        "rxn_scale_mol","comments","created_at","s_block_smiles","e_block_smiles","c_block_smiles","expected_smiles"
     ]
     # Keep only those that exist (in case schema varies)
     cols = [c for c in cols if c in df_join.columns]
