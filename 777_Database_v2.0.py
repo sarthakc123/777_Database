@@ -350,7 +350,6 @@ with st.form("reaction_form", clear_on_submit=False):
             if img: colC.image(img, caption=f"{label_key}")
         return smi
 
-
     s_smi = smiles_block("S-Block")
     e_smi = smiles_block("E-Block")
     c_smi = smiles_block("C-Block")
