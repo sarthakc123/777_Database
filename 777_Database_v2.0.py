@@ -373,18 +373,6 @@ with st.form("reaction_form", clear_on_submit=False):
                 vals.append(canonicalize_smiles(line))
         return vals
 
-    def _canonical_list(txt: str) -> List[Optional[str]]:
-        """Split lines, strip empties, canonicalize, allow empty list."""
-        if not txt:
-            return []
-        vals = []
-        for line in txt.splitlines():
-            line = line.strip()
-            if not line:
-                continue
-            vals.append(canonicalize_smiles(line))
-        return vals
-
 
     st.markdown("---")
 
@@ -431,7 +419,12 @@ with st.form("reaction_form", clear_on_submit=False):
         sets.append(condition_set(i))
 
     st.markdown("---")
-    expected_smi = canonicalize_smiles(st.text_input("Expected compound SMILES"))
+    # Expected SMILES (one per line, maps to row n)
+    expected_list_raw = st.text_area(
+        "Expected compound SMILES (one per line; maps to row n) *",
+        help="Line n corresponds to Sₙ/Eₙ/Cₙ. Leave a line blank to set None for that row."
+    ).strip()
+    EXP_list = _canonical_list_lines(expected_list_raw)
     rxn_scale_mol = st.number_input("RXN_Scale (mol) *", min_value=0.0, value = None, step=0.001, format="%f")
     # Comments (free text)
     comments = st.text_area("Comments (optional)", help="Notes, observations, yields, deviations, etc.")
@@ -458,39 +451,47 @@ with st.form("reaction_form", clear_on_submit=False):
             for e in errors:
                 st.error(e)
         else:
-            # Build positional lists: first entry is the single-field value (if any), then extra lines
-            S_list = ([canonicalize_smiles(s_smi)] if s_smi else []) + _canonical_list_lines(s_multi)
-            E_list = ([canonicalize_smiles(e_smi)] if e_smi else []) + _canonical_list_lines(e_multi)
-            C_list = ([canonicalize_smiles(c_smi)] if c_smi else []) + _canonical_list_lines(c_multi)
+            # Build S/E/C positional lists from single fields + (optional) multi-SEC text areas
+            S_list = ([canonicalize_smiles(s_smi)] if s_smi else []) + (
+                _canonical_list_lines(s_multi) if 's_multi' in locals() else [])
+            E_list = ([canonicalize_smiles(e_smi)] if e_smi else []) + (
+                _canonical_list_lines(e_multi) if 'e_multi' in locals() else [])
+            C_list = ([canonicalize_smiles(c_smi)] if c_smi else []) + (
+                _canonical_list_lines(c_multi) if 'c_multi' in locals() else [])
 
-            # If all three lists are empty, nothing to save (guard)
+            # If SEC lists are all empty, nothing to save
             if not (S_list or E_list or C_list):
                 st.error("No SEC variants to save.")
                 st.stop()
 
-            # Positional pairing: length is the max of the three; use None where shorter
+            # Positional length = max of SEC lists
             n = max(len(S_list), len(E_list), len(C_list))
-            pairs = []
+
+            # Expected list must be provided and match 'n' (1-to-1)
+            if len(EXP_list) != n:
+                st.error(f"Expected list length ({len(EXP_list)}) must match the number of SEC rows ({n}).")
+                st.stop()
+
+            # Build rows, skipping positions where all S/E/C are None/empty
+            rows = []
             for i in range(n):
                 s_val = S_list[i] if i < len(S_list) else None
                 e_val = E_list[i] if i < len(E_list) else None
                 c_val = C_list[i] if i < len(C_list) else None
-                if any([s_val, e_val, c_val]):  # skip rows where all three are empty
-                    pairs.append((s_val, e_val, c_val))
+                exp_val = EXP_list[i]  # exact 1-to-1 mapping
+                if any([s_val, e_val, c_val]):  # keep only meaningful SEC rows
+                    rows.append((s_val, e_val, c_val, exp_val))
 
-            if not pairs:
-                st.error("No valid SEC rows (all empty).")
+            if not rows:
+                st.error("All SEC rows are empty.")
                 st.stop()
 
-            # Reserve a block of IDs and insert one reaction per positional SEC triplet
+            # Reserve contiguous IDs; one reaction per positional row
             base_idx = next_reaction_index(selected_initials)
-            saved = 0
-            failures = 0
+            saved, failures = 0, 0
 
-            for offset, (s_val, e_val, c_val) in enumerate(pairs):
+            for offset, (s_val, e_val, c_val, exp_val) in enumerate(rows):
                 rid = format_reaction_id(selected_initials, base_idx + offset)
-
-                # Compute oligomer based on this row’s S/E/C presence
                 present = sum(1 for x in [s_val, e_val, c_val] if x)
                 oligo = "dimer" if present == 2 else ("trimer" if present == 3 else None)
 
@@ -498,11 +499,11 @@ with st.form("reaction_form", clear_on_submit=False):
                     rid=rid,
                     initials=selected_initials,
                     s_smi=s_val, e_smi=e_val, c_smi=c_val,
-                    expected_smi=expected_smi,
+                    expected_smi=exp_val,
                     rxn_scale_mol=float(rxn_scale_mol),
                     oligomer_type=oligo,
                     sets=sets,
-                    comments=comments if "comments" in locals() else None  # if you added comments earlier
+                    comments=comments if "comments" in locals() else None
                 )
                 if ok:
                     saved += 1
@@ -510,7 +511,7 @@ with st.form("reaction_form", clear_on_submit=False):
                     failures += 1
 
             if saved:
-                st.success(f"Saved **{saved}** reaction(s) (positional SEC) with the same condition set(s).")
+                st.success(f"Saved **{saved}** reaction(s) (positional SEC + Expected) with the same condition set(s).")
                 st.balloons()
             if failures:
                 st.warning(f"{failures} reaction(s) failed to save. Check data/RLS and try again.")
