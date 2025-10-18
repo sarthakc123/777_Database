@@ -11,6 +11,7 @@ from pathlib import Path
 
 import streamlit as st
 import pandas as pd
+import itertools
 
 # ---------- Optional RDKit (skip if not needed) ----------
 try:
@@ -353,6 +354,37 @@ with st.form("reaction_form", clear_on_submit=False):
     s_smi = smiles_block("S-Block")
     e_smi = smiles_block("E-Block")
     c_smi = smiles_block("C-Block")
+    # Positional multi-SEC (optional). One variant per line; nth S pairs with nth E and nth C.
+    with st.expander("Add multiple SEC variants (positional pairing)"):
+        st.caption("Enter extra variants, one per line (Sₙ pairs with Eₙ and Cₙ).")
+        s_multi = st.text_area("Extra S variants (one per line)", key="s_multi_pos").strip()
+        e_multi = st.text_area("Extra E variants (one per line)", key="e_multi_pos").strip()
+        c_multi = st.text_area("Extra C variants (one per line)", key="c_multi_pos").strip()
+
+
+    def _canonical_list_lines(txt: str) -> list:
+        if not txt: return []
+        vals = []
+        for line in txt.splitlines():
+            line = line.strip()
+            if not line:
+                vals.append(None)  # keep position even if blank
+            else:
+                vals.append(canonicalize_smiles(line))
+        return vals
+
+    def _canonical_list(txt: str) -> List[Optional[str]]:
+        """Split lines, strip empties, canonicalize, allow empty list."""
+        if not txt:
+            return []
+        vals = []
+        for line in txt.splitlines():
+            line = line.strip()
+            if not line:
+                continue
+            vals.append(canonicalize_smiles(line))
+        return vals
+
 
     st.markdown("---")
 
@@ -406,8 +438,8 @@ with st.form("reaction_form", clear_on_submit=False):
 
     # Validation
     errors = []
-    if not any([s_smi, e_smi, c_smi]):
-        errors.append("Provide at least one of S/E/C block SMILES.")
+    if not any([s_smi, e_smi, c_smi]) and not any([s_multi, e_multi, c_multi]):
+        errors.append("Provide at least one of S/E/C block SMILES (single or multi-SEC).")
     if rxn_scale_mol is None or rxn_scale_mol <= 0:
         errors.append("RXN_Scale (mol) must be > 0.")
     for i, cs in enumerate(sets, start=1):
@@ -423,19 +455,65 @@ with st.form("reaction_form", clear_on_submit=False):
     submitted = st.form_submit_button("Save reaction", type="primary")
     if submitted:
         if errors:
-            for e in errors: st.error(e)
+            for e in errors:
+                st.error(e)
         else:
-            rid = format_reaction_id(selected_initials, next_reaction_index(selected_initials))
-            if insert_reaction_with_sets(
-                    rid=rid, initials=selected_initials,
-                    s_smi=s_smi, e_smi=e_smi, c_smi=c_smi,
-                    expected_smi=expected_smi, rxn_scale_mol=float(rxn_scale_mol),
-                    oligomer_type=oligomer_type, sets=sets
-            ):
-                st.success(f"Saved reaction **{rid}** with {len(sets)} set(s).")
+            # Build positional lists: first entry is the single-field value (if any), then extra lines
+            S_list = ([canonicalize_smiles(s_smi)] if s_smi else []) + _canonical_list_lines(s_multi)
+            E_list = ([canonicalize_smiles(e_smi)] if e_smi else []) + _canonical_list_lines(e_multi)
+            C_list = ([canonicalize_smiles(c_smi)] if c_smi else []) + _canonical_list_lines(c_multi)
+
+            # If all three lists are empty, nothing to save (guard)
+            if not (S_list or E_list or C_list):
+                st.error("No SEC variants to save.")
+                st.stop()
+
+            # Positional pairing: length is the max of the three; use None where shorter
+            n = max(len(S_list), len(E_list), len(C_list))
+            pairs = []
+            for i in range(n):
+                s_val = S_list[i] if i < len(S_list) else None
+                e_val = E_list[i] if i < len(E_list) else None
+                c_val = C_list[i] if i < len(C_list) else None
+                if any([s_val, e_val, c_val]):  # skip rows where all three are empty
+                    pairs.append((s_val, e_val, c_val))
+
+            if not pairs:
+                st.error("No valid SEC rows (all empty).")
+                st.stop()
+
+            # Reserve a block of IDs and insert one reaction per positional SEC triplet
+            base_idx = next_reaction_index(selected_initials)
+            saved = 0
+            failures = 0
+
+            for offset, (s_val, e_val, c_val) in enumerate(pairs):
+                rid = format_reaction_id(selected_initials, base_idx + offset)
+
+                # Compute oligomer based on this row’s S/E/C presence
+                present = sum(1 for x in [s_val, e_val, c_val] if x)
+                oligo = "dimer" if present == 2 else ("trimer" if present == 3 else None)
+
+                ok = insert_reaction_with_sets(
+                    rid=rid,
+                    initials=selected_initials,
+                    s_smi=s_val, e_smi=e_val, c_smi=c_val,
+                    expected_smi=expected_smi,
+                    rxn_scale_mol=float(rxn_scale_mol),
+                    oligomer_type=oligo,
+                    sets=sets,
+                    comments=comments if "comments" in locals() else None  # if you added comments earlier
+                )
+                if ok:
+                    saved += 1
+                else:
+                    failures += 1
+
+            if saved:
+                st.success(f"Saved **{saved}** reaction(s) (positional SEC) with the same condition set(s).")
                 st.balloons()
-            else:
-                st.error("Failed to save reaction. Check your data and try again.")
+            if failures:
+                st.warning(f"{failures} reaction(s) failed to save. Check data/RLS and try again.")
 
 # =========================
 # Recent submissions — consolidated join (reactions × reaction_conditions)
