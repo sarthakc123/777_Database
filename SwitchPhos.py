@@ -145,7 +145,7 @@ hdr_l, hdr_r = st.columns([4, 1.2])
 with hdr_l:
     st.title(APP_TITLE)
 with hdr_r:
-    try: st.image(LOGO_FILE, use_container_width=True)
+    try: st.image("IMG_0405.jpeg", use_container_width=True)
     except Exception: pass
 
 get_supabase()
