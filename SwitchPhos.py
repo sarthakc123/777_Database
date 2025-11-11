@@ -74,7 +74,6 @@ def require_login_first_page():
         if ok:
             if _valid_user(u.strip(), p):
                 st.session_state["auth_user"] = u.strip()
-                st.experimental_rerun()
             else:
                 st.error("Invalid credentials.")
     st.stop()
