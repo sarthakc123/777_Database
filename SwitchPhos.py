@@ -4,6 +4,7 @@
 #  - Live preview on lookup (no buttons) for Phosphine & OAC
 #  - YRTS is a percentage (0..100)
 #  - OAC quick-pick pushes into Coupling tab
+#  - SIMPLE LOGIN PAGE (first screen) controlled by secrets.auth
 
 import requests
 from typing import Optional, Dict, Tuple, Any
@@ -20,6 +21,66 @@ except Exception:
 APP_TITLE = "SwitchPhos DB"
 LOGO_FILE = "24-MML-3Col (2).jpg"
 COUPLING_TYPES = ["Suzuki", "Buchwald", "Other"]
+
+# =========================
+# Auth helpers (first page)
+# =========================
+def _auth_enabled() -> bool:
+    try:
+        return bool(st.secrets["auth"].get("enabled", True))
+    except Exception:
+        return False
+
+def _valid_user(u: str, p: str) -> bool:
+    try:
+        users = st.secrets["auth"]["users"]  # {username: password}
+        return u in users and str(users[u]) == str(p)
+    except Exception:
+        return False
+
+def maybe_set_page_config():
+    """Call set_page_config at most once in this run."""
+    if not st.session_state.get("_pc_set"):
+        st.set_page_config(page_title=APP_TITLE, page_icon=LOGO_FILE, layout="wide")
+        st.session_state["_pc_set"] = True
+
+def require_login_first_page():
+    """Show login screen (first page) and stop the script until authenticated."""
+    if not _auth_enabled():
+        return  # no auth gate
+
+    # Already authenticated?
+    if st.session_state.get("auth_user"):
+        # Show a small status + logout
+        with st.sidebar:
+            st.success(f"Signed in as {st.session_state['auth_user']}")
+            if st.button("Log out", key="logout_btn"):
+                st.session_state.pop("auth_user", None)
+        return
+
+    # Not authenticated yet: render the login page and stop
+    maybe_set_page_config()
+    col1, col2, col3 = st.columns([1,2,1])
+    with col2:
+        st.image(LOGO_FILE, use_container_width=True)
+        st.title("SwitchPhos DB")
+        st.subheader("Sign in")
+
+        with st.form("login_form", clear_on_submit=False):
+            u = st.text_input("Username", key="login_user")
+            p = st.text_input("Password", type="password", key="login_pass")
+            ok = st.form_submit_button("Sign in", type="primary")
+
+        if ok:
+            if _valid_user(u.strip(), p):
+                st.session_state["auth_user"] = u.strip()
+                st.experimental_rerun()
+            else:
+                st.error("Invalid credentials.")
+    st.stop()
+
+# Gate the app before anything else renders
+require_login_first_page()
 
 # -------------------------
 # Supabase thin client
@@ -132,7 +193,6 @@ def consume_pending_or_default(target_key: str, default_value=""):
     pend_key = f"_pending_{target_key}"
     if pend_key in st.session_state:
         v = st.session_state.pop(pend_key)
-        # also update the "last_*" convenience if relevant
         st.session_state[target_key] = v  # sets the value BEFORE widget creation
         return v
     return st.session_state.get(target_key, default_value)
@@ -146,7 +206,6 @@ def on_change_oac_code_autofill():
     if not (res and res.get("ok") and len(res.get("rows",[])) > 0):
         return
     row = res["rows"][0]
-    # schedule all field values for the next run (before widgets instantiate)
     if row.get("phos_code") is not None:
         st.session_state["_pending_oac_phos_code_ref"] = row["phos_code"]
         st.session_state["last_phos_code"] = row["phos_code"]
@@ -178,7 +237,6 @@ def load_oac_into_form(oac_code: str):
         st.warning("No OAC found for that code.")
         return
     row = res["rows"][0]
-    # schedule prefill of ALL editable inputs
     st.session_state["_pending_oac_code_in"]           = row.get("oac_code","")
     st.session_state["_pending_oac_phos_code_ref"]     = row.get("phos_code","") or ""
     st.session_state["_pending_oac_phos_name_prefill"] = row.get("phosphine_name","") or ""
@@ -192,7 +250,7 @@ def load_oac_into_form(oac_code: str):
 # -------------------------
 # UI Shell
 # -------------------------
-st.set_page_config(page_title=APP_TITLE, page_icon=LOGO_FILE, layout="wide")
+maybe_set_page_config()  # <- safe version
 hdr_l, hdr_r = st.columns([4, 1.2])
 with hdr_l:
     st.title(APP_TITLE)
@@ -286,26 +344,20 @@ with tab_oac:
                 code = row["phos_code"]
                 name = row.get("phosphine_name") or ""
                 smi = row.get("phosphine_smiles") or ""
-
-                # remember for convenience
                 st.session_state.last_phos_code = code
-
-                # schedule all three for next run (so values apply BEFORE widgets are created)
                 st.session_state["_pending_oac_phos_code_ref"] = code
                 st.session_state["_pending_oac_phos_name_prefill"] = name
                 st.session_state["_pending_oac_phos_smiles_prefill"] = smi
-
                 st.rerun()
         else:
             st.caption("No phosphines to pick yet.")
-
 
         # OAC code input — attach on_change callback
         oac_code_in = st.text_input(
             "OAC Reaction Code (required)",
             value=consume_pending_or_default("oac_code_in", st.session_state.get("last_oac_code", "")),
             key="oac_code_in",
-            on_change=on_change_oac_code_autofill,  # <--- NEW
+            on_change=on_change_oac_code_autofill,
         )
 
         # Phosphine Code (can be filled either by user, quick pick, or by OAC fetch)
@@ -417,7 +469,7 @@ with tab_coup:
             if st.button("Use this OAC in Coupling tab", key="use_oac_btn"):
                 code = df_quick.iloc[idx]["oac_code"]
                 st.session_state.last_oac_code = code
-                push_for_next_run("cpl_oac_code_ref", code)   # your existing helper
+                push_for_next_run("cpl_oac_code_ref", code)
         else:
             st.caption("No OAC rows to pick yet.")
 
@@ -435,7 +487,7 @@ with tab_coup:
         if res["ok"] and res["rows"]:
             ocj_row = res["rows"][0]
 
-    # --- Auto-populating LOOKUP fields (dynamic keys force refresh when code changes) ---
+    # Auto-populating LOOKUP fields (read-only)
     dyn_suffix = oac_code_ref2 or "blank"
     cTop1, cTop2 = st.columns(2)
     with cTop1:
@@ -465,7 +517,7 @@ with tab_coup:
             key=f"lookup_oac_smiles_cpl::{dyn_suffix}",
         )
 
-    # --- Editable Coupling inputs ---
+    # Editable Coupling inputs
     coupling_type = st.selectbox("Type of reaction", options=COUPLING_TYPES, index=0, key="cpl_type")
     solvent       = st.text_input("Solvent", key="cpl_solvent")
     base_name     = st.text_input("Base name (e.g., BTMG)", key="cpl_base_name")
@@ -489,7 +541,7 @@ with tab_coup:
                 "base_name":     base_name or None,
                 "base_equiv":    None if (base_equiv is None or base_equiv == 0.0) else float(base_equiv),
                 "temperature_c": float(temperature_c),
-                "yrts":          None if yrts_pct is None else float(yrts_pct),  # store as numeric %
+                "yrts":          None if yrts_pct is None else float(yrts_pct),
                 "assay_yield":   None if assay_yield is None else float(assay_yield),
                 "notes":         notes_cr or None,
             }
@@ -500,7 +552,6 @@ with tab_coup:
                 st.success("Saved coupling result.")
                 if oac_code_ref2:
                     st.session_state.last_oac_code = oac_code_ref2
-
 
 # -------------------------
 # Tables (MASKED DISPLAY)
@@ -525,7 +576,6 @@ else:
         "notes":"Notes",
         "created_at":"Created_UTC"
     })
-    # MASKED: show only code
     st.dataframe(df_ph_view[["Phos_Code"]], use_container_width=True, hide_index=True)
 
 st.markdown("---")
@@ -552,7 +602,6 @@ else:
         "notes":"Notes",
         "created_at":"Created_UTC"
     })
-    # MASKED: show only codes
     st.dataframe(df_oacj_view[["OAC_Code","Phos_Code"]], use_container_width=True, hide_index=True)
 
 st.markdown("---")
@@ -585,7 +634,6 @@ else:
         "phosphine_name":"Phosphine_Name",
         "phosphine_smiles":"Phosphine_SMILES"
     })
-    # MASKED: show only codes (keep ID hidden too)
     st.dataframe(df_cplf_view[["OAC_Code","Phos_Code"]],
                  use_container_width=True, hide_index=True)
 
