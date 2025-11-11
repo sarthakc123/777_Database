@@ -529,7 +529,7 @@ else:
     st.dataframe(df_ph_view[["Phos_Code"]], use_container_width=True, hide_index=True)
 
 st.markdown("---")
-st.subheader("OAC (joined with Phosphine) — `sp_oac_with_phosphine`")
+st.subheader("OAC (joined with Phosphine)")
 oac_joined = sb_request(
     "GET",
     "sp_oac_with_phosphine",
@@ -556,7 +556,7 @@ else:
     st.dataframe(df_oacj_view[["OAC_Code","Phos_Code"]], use_container_width=True, hide_index=True)
 
 st.markdown("---")
-st.subheader("Coupling Result (full joined) — `sp_coupling_full`")
+st.subheader("Coupling Result (full joined)")
 cpl_full = sb_request(
     "GET",
     "sp_coupling_full",
