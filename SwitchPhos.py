@@ -501,8 +501,9 @@ with tab_coup:
                 if oac_code_ref2:
                     st.session_state.last_oac_code = oac_code_ref2
 
+
 # -------------------------
-# Tables
+# Tables (MASKED DISPLAY)
 # -------------------------
 st.markdown("---")
 st.subheader("Phosphines")
@@ -524,7 +525,8 @@ else:
         "notes":"Notes",
         "created_at":"Created_UTC"
     })
-    st.dataframe(df_ph_view, use_container_width=True, hide_index=True)
+    # MASKED: show only code
+    st.dataframe(df_ph_view[["Phos_Code"]], use_container_width=True, hide_index=True)
 
 st.markdown("---")
 st.subheader("OAC (joined with Phosphine) — `sp_oac_with_phosphine`")
@@ -535,18 +537,23 @@ oac_joined = sb_request(
             "order":"created_at.desc","limit":200}
 ) or []
 df_oacj = pd.DataFrame(oac_joined)
+
 if df_oacj.empty:
     st.info("No OAC rows yet.")
 else:
-    st.dataframe(
-        df_oacj.rename(columns={
-            "oac_code":"OAC_Code","phos_code":"Phos_Code","phosphine_name":"Phosphine_Name",
-            "phosphine_smiles":"Phosphine_SMILES","oac_smiles":"OAC_SMILES",
-            "bromine_name":"Bromine_Name","bromine_smiles":"Bromine_SMILES",
-            "notes":"Notes","created_at":"Created_UTC"
-        }),
-        use_container_width=True, hide_index=True
-    )
+    df_oacj_view = df_oacj.rename(columns={
+        "oac_code":"OAC_Code",
+        "phos_code":"Phos_Code",
+        "phosphine_name":"Phosphine_Name",
+        "phosphine_smiles":"Phosphine_SMILES",
+        "oac_smiles":"OAC_SMILES",
+        "bromine_name":"Bromine_Name",
+        "bromine_smiles":"Bromine_SMILES",
+        "notes":"Notes",
+        "created_at":"Created_UTC"
+    })
+    # MASKED: show only codes
+    st.dataframe(df_oacj_view[["OAC_Code","Phos_Code"]], use_container_width=True, hide_index=True)
 
 st.markdown("---")
 st.subheader("Coupling Result (full joined) — `sp_coupling_full`")
@@ -557,35 +564,34 @@ cpl_full = sb_request(
             "order":"created_at.desc","limit":200}
 ) or []
 df_cplf = pd.DataFrame(cpl_full)
+
 if df_cplf.empty:
     st.info("No coupling results yet.")
 else:
-    def _fmt_base(row):
-        b, e = row.get("base_name"), row.get("base_equiv")
-        if pd.isna(b) or not b: return None
-        try:
-            e_val = None if (e is None or (isinstance(e, float) and e == 0.0)) else float(e)
-        except Exception:
-            e_val = None
-        return b if not e_val else f"{b} ({e_val:g}eq)"
-    df_cplf["Base_Display"] = df_cplf.apply(_fmt_base, axis=1)
+    df_cplf_view = df_cplf.rename(columns={
+        "id":"ID",
+        "oac_code":"OAC_Code",
+        "phos_code":"Phos_Code",
+        "coupling_type":"Type",
+        "solvent":"Solvent",
+        "temperature_c":"Temp_C",
+        "yrts":"YRTS_pct",
+        "assay_yield":"Assay_Yield_pct",
+        "notes":"Notes",
+        "created_at":"Created_UTC",
+        "oac_smiles":"OAC_SMILES",
+        "bromine_name":"Bromine_Name",
+        "bromine_smiles":"Bromine_SMILES",
+        "phosphine_name":"Phosphine_Name",
+        "phosphine_smiles":"Phosphine_SMILES"
+    })
+    # MASKED: show only codes (keep ID hidden too)
+    st.dataframe(df_cplf_view[["OAC_Code","Phos_Code"]],
+                 use_container_width=True, hide_index=True)
 
-    st.dataframe(
-        df_cplf.rename(columns={
-            "id":"ID","oac_code":"OAC_Code","coupling_type":"Type","solvent":"Solvent",
-            "temperature_c":"Temp_C","yrts":"YRTS_pct","assay_yield":"Assay_Yield_pct",
-            "notes":"Notes","created_at":"Created_UTC","phos_code":"Phos_Code",
-            "oac_smiles":"OAC_SMILES","bromine_name":"Bromine_Name","bromine_smiles":"Bromine_SMILES",
-            "phosphine_name":"Phosphine_Name","phosphine_smiles":"Phosphine_SMILES"
-        })[[
-            "ID","OAC_Code","Phos_Code","Phosphine_Name","Phosphine_SMILES",
-            "OAC_SMILES","Bromine_Name","Bromine_SMILES",
-            "Type","Solvent","Base_Display","Temp_C","YRTS_pct","Assay_Yield_pct","Notes","Created_UTC"
-        ]],
-        use_container_width=True, hide_index=True
-    )
-
-# Sidebar exports
+# -------------------------
+# Sidebar exports (FULL, unmasked)
+# -------------------------
 with st.sidebar:
     st.markdown("---")
     st.header("Export")
