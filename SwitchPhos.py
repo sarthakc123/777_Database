@@ -553,7 +553,7 @@ with tab_coup:
                     st.session_state.last_oac_code = oac_code_ref2
 
 # -------------------------
-# Tables (MASKED DISPLAY)
+# Tables (UNMASKED DISPLAY)
 # -------------------------
 st.markdown("---")
 st.subheader("Phosphines")
@@ -575,7 +575,8 @@ else:
         "notes":"Notes",
         "created_at":"Created_UTC"
     })
-    st.dataframe(df_ph_view[["Phos_Code"]], use_container_width=True, hide_index=True)
+    # UNMASKED: show all columns
+    st.dataframe(df_ph_view, use_container_width=True, hide_index=True)
 
 st.markdown("---")
 st.subheader("OAC (joined with Phosphine)")
@@ -601,7 +602,8 @@ else:
         "notes":"Notes",
         "created_at":"Created_UTC"
     })
-    st.dataframe(df_oacj_view[["OAC_Code","Phos_Code"]], use_container_width=True, hide_index=True)
+    # UNMASKED: show all columns
+    st.dataframe(df_oacj_view, use_container_width=True, hide_index=True)
 
 st.markdown("---")
 st.subheader("Coupling Result (full joined)")
@@ -633,8 +635,8 @@ else:
         "phosphine_name":"Phosphine_Name",
         "phosphine_smiles":"Phosphine_SMILES"
     })
-    st.dataframe(df_cplf_view[["OAC_Code","Phos_Code"]],
-                 use_container_width=True, hide_index=True)
+    # UNMASKED: show all columns
+    st.dataframe(df_cplf_view, use_container_width=True, hide_index=True)
 
 # -------------------------
 # Sidebar exports (FULL, unmasked)
