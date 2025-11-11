@@ -137,6 +137,58 @@ def consume_pending_or_default(target_key: str, default_value=""):
         return v
     return st.session_state.get(target_key, default_value)
 
+def on_change_oac_code_autofill():
+    """When OAC code changes, fetch row and prefill OAC tab inputs for next run."""
+    oac_code = st.session_state.get("oac_code_in","").strip()
+    if not oac_code:
+        return
+    res = fetch_oac(oac_code)
+    if not (res and res.get("ok") and len(res.get("rows",[])) > 0):
+        return
+    row = res["rows"][0]
+    # schedule all field values for the next run (before widgets instantiate)
+    if row.get("phos_code") is not None:
+        st.session_state["_pending_oac_phos_code_ref"] = row["phos_code"]
+        st.session_state["last_phos_code"] = row["phos_code"]
+    st.session_state["_pending_oac_smiles_in"]         = row.get("oac_smiles") or ""
+    st.session_state["_pending_oac_bromine_name_in"]   = row.get("bromine_name") or ""
+    st.session_state["_pending_oac_bromine_smiles_in"] = row.get("bromine_smiles") or ""
+    st.session_state["_pending_oac_notes_in"]          = row.get("notes") or ""
+    st.rerun()
+
+def fetch_oac_joined(oac_code: str):
+    """Fetch OAC row joined with phosphine info (from view)."""
+    if not oac_code:
+        return {"ok": False, "status": None, "rows": [], "msg": "empty code"}
+    status, raw, parsed = sb_get_verbose(
+        "sp_oac_with_phosphine",
+        params={
+            "select": "oac_code,phos_code,phosphine_name,phosphine_smiles,oac_smiles,bromine_name,bromine_smiles,notes",
+            "oac_code": f"eq.{oac_code.strip()}",
+            "limit": 1
+        }
+    )
+    rows = parsed if isinstance(parsed, list) else []
+    return {"ok": status in (200, 206), "status": status, "rows": rows, "msg": raw[:2000]}
+
+def load_oac_into_form(oac_code: str):
+    """Load an OAC (joined) row and schedule ALL OAC form fields to prefill next run."""
+    res = fetch_oac_joined(oac_code)
+    if not (res["ok"] and res["rows"]):
+        st.warning("No OAC found for that code.")
+        return
+    row = res["rows"][0]
+    # schedule prefill of ALL editable inputs
+    st.session_state["_pending_oac_code_in"]           = row.get("oac_code","")
+    st.session_state["_pending_oac_phos_code_ref"]     = row.get("phos_code","") or ""
+    st.session_state["_pending_oac_phos_name_prefill"] = row.get("phosphine_name","") or ""
+    st.session_state["_pending_oac_phos_smiles_prefill"] = row.get("phosphine_smiles","") or ""
+    st.session_state["_pending_oac_smiles_in"]         = row.get("oac_smiles","") or ""
+    st.session_state["_pending_oac_bromine_name_in"]   = row.get("bromine_name","") or ""
+    st.session_state["_pending_oac_bromine_smiles_in"] = row.get("bromine_smiles","") or ""
+    st.session_state["_pending_oac_notes_in"]          = row.get("notes","") or ""
+    st.rerun()
+
 # -------------------------
 # UI Shell
 # -------------------------
@@ -207,17 +259,17 @@ with tab_phos:
 
 # ===== OAC =====
 with tab_oac:
-    st.subheader("OAC Reaction — Independent Create/Update (auto-populate from Phosphine Code)")
+    st.subheader("OAC Reaction")
 
-    # --- NEW: Quick pick a Phosphine Code (recent first) ---
     with st.expander("Quick pick a Phosphine Code"):
         ph_quick = sb_request(
             "GET",
             "sp_phosphines",
-            params={"select": "phos_code,phosphine_name,created_at",
+            params={"select": "phos_code,phosphine_name,phosphine_smiles,created_at",
                     "order": "created_at.desc", "limit": 200}
         ) or []
         df_ph_quick = pd.DataFrame(ph_quick)
+
         if not df_ph_quick.empty:
             ph_labels = [
                 f"{row['phos_code']} — {row.get('phosphine_name') or ''}"
@@ -230,78 +282,116 @@ with tab_oac:
                 key="pick_phos_idx_for_oac"
             )
             if st.button("Use this Phosphine in OAC tab", key="use_phos_for_oac_btn"):
-                code = df_ph_quick.iloc[ph_idx]["phos_code"]
+                row = df_ph_quick.iloc[ph_idx]
+                code = row["phos_code"]
+                name = row.get("phosphine_name") or ""
+                smi = row.get("phosphine_smiles") or ""
+
+                # remember for convenience
                 st.session_state.last_phos_code = code
-                # schedule population of the OAC input on the next run
-                push_for_next_run("oac_phos_code_ref", code)
+
+                # schedule all three for next run (so values apply BEFORE widgets are created)
+                st.session_state["_pending_oac_phos_code_ref"] = code
+                st.session_state["_pending_oac_phos_name_prefill"] = name
+                st.session_state["_pending_oac_phos_smiles_prefill"] = smi
+
+                st.rerun()
         else:
             st.caption("No phosphines to pick yet.")
 
-    # OAC inputs (note: use consume_pending_or_default for the phos code field)
-    oac_code_in = st.text_input(
-        "OAC Reaction Code (required)",
-        value=st.session_state.get("last_oac_code",""),
-        key="oac_code_in"
-    )
-    phos_code_ref = st.text_input(
-        "Phosphine Code (auto-fills name/SMILES)",
-        value=consume_pending_or_default("oac_phos_code_ref", st.session_state.get("last_phos_code","")),
-        key="oac_phos_code_ref",
-    )
 
-    # Live auto-fill from phosphine
-    ph_row = None
-    if phos_code_ref.strip():
-        res = fetch_phosphine(phos_code_ref.strip())
-        if res["ok"] and len(res["rows"]) > 0:
-            ph_row = res["rows"][0]
-
-    cA, cB = st.columns(2)
-    with cA:
-        phos_name_prefill = st.text_input(
-            "Phosphine Name (auto-filled)",
-            value=(ph_row or {}).get("phosphine_name",""),
-            key="oac_phos_name_prefill"
-        )
-    with cB:
-        phos_smiles_prefill = st.text_input(
-            "Phosphine SMILES (auto-filled)",
-            value=(ph_row or {}).get("phosphine_smiles",""),
-            key="oac_phos_smiles_prefill"
+        # OAC code input — attach on_change callback
+        oac_code_in = st.text_input(
+            "OAC Reaction Code (required)",
+            value=consume_pending_or_default("oac_code_in", st.session_state.get("last_oac_code", "")),
+            key="oac_code_in",
+            on_change=on_change_oac_code_autofill,  # <--- NEW
         )
 
-    oac_smiles     = st.text_input("OAC SMILES", key="oac_smiles_in")
-    bromine_name   = st.text_input("Bromine Name", key="oac_bromine_name_in")
-    bromine_smiles = st.text_input("Bromine SMILES", key="oac_bromine_smiles_in")
-    oac_notes      = st.text_area("Notes (optional)", key="oac_notes_in")
+        # Phosphine Code (can be filled either by user, quick pick, or by OAC fetch)
+        phos_code_ref = st.text_input(
+            "Phosphine Code (auto-fills name/SMILES)",
+            value=consume_pending_or_default("oac_phos_code_ref", st.session_state.get("last_phos_code", "")),
+            key="oac_phos_code_ref",
+        )
 
-    if st.button("Save OAC Reaction", type="primary", key="save_oac_btn"):
-        errs = []
-        if not oac_code_in.strip():
-            errs.append("OAC Reaction Code is required.")
-        if errs:
-            for e in errs: st.error(e)
-        else:
-            payload = {
-                "oac_code":     oac_code_in.strip(),
-                "phos_code":    phos_code_ref.strip() or None,  # soft link
-                "oac_smiles":   canon(oac_smiles or None),
-                "bromine_name": bromine_name or None,
-                "bromine_smiles": canon(bromine_smiles or None),
-                "notes":        oac_notes or None
-            }
-            ins = sb_request("POST","sp_oac_reactions", json_body=payload)
-            if not ins:
-                upd = sb_request("PATCH","sp_oac_reactions", json_body=payload, params={"oac_code": f"eq.{oac_code_in.strip()}"})
-                if not upd:
-                    st.error("Failed to save OAC reaction.")
-                else:
-                    st.success(f"Updated OAC {oac_code_in.strip()}.")
+        # Live auto-fill for phosphine display (as you type)
+        ph_row = None
+        if phos_code_ref.strip():
+            res = fetch_phosphine(phos_code_ref.strip())
+            if res["ok"] and len(res["rows"]) > 0:
+                ph_row = res["rows"][0]
+
+        cA, cB = st.columns(2)
+        with cA:
+            phos_name_prefill = st.text_input(
+                "Phosphine Name (auto-filled)",
+                value=consume_pending_or_default(
+                    "oac_phos_name_prefill",
+                    (ph_row or {}).get("phosphine_name", "")
+                ),
+                key="oac_phos_name_prefill",
+            )
+        with cB:
+            phos_smiles_prefill = st.text_input(
+                "Phosphine SMILES (auto-filled)",
+                value=consume_pending_or_default(
+                    "oac_phos_smiles_prefill",
+                    (ph_row or {}).get("phosphine_smiles", "")
+                ),
+                key="oac_phos_smiles_prefill",
+            )
+
+        # These now “consume pending” values that the OAC code on_change callback sets
+        oac_smiles = st.text_input(
+            "OAC SMILES",
+            value=consume_pending_or_default("oac_smiles_in", ""),
+            key="oac_smiles_in",
+        )
+        bromine_name = st.text_input(
+            "Bromine Name",
+            value=consume_pending_or_default("oac_bromine_name_in", ""),
+            key="oac_bromine_name_in",
+        )
+        bromine_smiles = st.text_input(
+            "Bromine SMILES",
+            value=consume_pending_or_default("oac_bromine_smiles_in", ""),
+            key="oac_bromine_smiles_in",
+        )
+        oac_notes = st.text_area(
+            "Notes (optional)",
+            value=consume_pending_or_default("oac_notes_in", ""),
+            key="oac_notes_in",
+        )
+
+        if st.button("Save OAC Reaction", type="primary", key="save_oac_btn"):
+            errs = []
+            if not oac_code_in.strip():
+                errs.append("OAC Reaction Code is required.")
+            if errs:
+                for e in errs: st.error(e)
             else:
-                st.success(f"Saved OAC {oac_code_in.strip()}.")
-            st.session_state.last_oac_code = oac_code_in.strip()
-            if phos_code_ref.strip():
-                st.session_state.last_phos_code = phos_code_ref.strip()
+                payload = {
+                    "oac_code": oac_code_in.strip(),
+                    "phos_code": phos_code_ref.strip() or None,
+                    "oac_smiles": canon(oac_smiles or None),
+                    "bromine_name": bromine_name or None,
+                    "bromine_smiles": canon(bromine_smiles or None),
+                    "notes": oac_notes or None
+                }
+                ins = sb_request("POST", "sp_oac_reactions", json_body=payload)
+                if not ins:
+                    upd = sb_request("PATCH", "sp_oac_reactions", json_body=payload,
+                                     params={"oac_code": f"eq.{oac_code_in.strip()}"})
+                    if not upd:
+                        st.error("Failed to save OAC reaction.")
+                    else:
+                        st.success(f"Updated OAC {oac_code_in.strip()}.")
+                else:
+                    st.success(f"Saved OAC {oac_code_in.strip()}.")
+                st.session_state.last_oac_code = oac_code_in.strip()
+                if phos_code_ref.strip():
+                    st.session_state.last_phos_code = phos_code_ref.strip()
 
 # ===== COUPLING =====
 with tab_coup:
@@ -310,10 +400,11 @@ with tab_coup:
     # Quick pick for OAC codes (from joined view, recent first)
     with st.expander("Quick pick an OAC Code"):
         oac_quick = sb_request(
-            "GET",
-            "sp_oac_with_phosphine",
-            params={"select":"oac_code,phos_code,phosphine_name,bromine_name,oac_smiles,created_at",
-                    "order":"created_at.desc","limit":200}
+            "GET", "sp_oac_with_phosphine",
+            params={
+                "select": "oac_code,phos_code,phosphine_name,oac_smiles,created_at",
+                "order": "created_at.desc", "limit": 200
+            }
         ) or []
         df_quick = pd.DataFrame(oac_quick)
         if not df_quick.empty:
@@ -321,83 +412,100 @@ with tab_coup:
                 f"{row['oac_code']} — {row.get('phos_code') or ''} — {row.get('phosphine_name') or ''}"
                 for _, row in df_quick.iterrows()
             ]
-            idx = st.selectbox("Pick OAC", options=list(range(len(df_quick))), format_func=lambda i: labels[i], key="pick_oac_idx")
+            idx = st.selectbox("Pick OAC", options=list(range(len(df_quick))),
+                               format_func=lambda i: labels[i], key="pick_oac_idx")
             if st.button("Use this OAC in Coupling tab", key="use_oac_btn"):
                 code = df_quick.iloc[idx]["oac_code"]
                 st.session_state.last_oac_code = code
-                push_for_next_run("cpl_oac_code_ref", code)
+                push_for_next_run("cpl_oac_code_ref", code)   # your existing helper
         else:
             st.caption("No OAC rows to pick yet.")
 
-    # Live context from OAC code as you type
+    # Live OAC code (typing or quick-pick both land here)
     oac_code_ref2 = st.text_input(
         "OAC Reaction Code (live context)",
         value=consume_pending_or_default("cpl_oac_code_ref", st.session_state.get("last_oac_code", "")),
         key="cpl_oac_code_ref",
-    )
-    oc_row = None
-    if oac_code_ref2.strip():
-        oc_res = fetch_oac(oac_code_ref2.strip())
-        if oc_res["ok"] and len(oc_res["rows"]) > 0:
-            oc_row = oc_res["rows"][0]
+    ).strip()
 
-    ph_row_cpl = None
-    if oc_row and oc_row.get("phos_code"):
-        ph_res2 = fetch_phosphine(oc_row["phos_code"])
-        if ph_res2["ok"] and len(ph_res2["rows"]) > 0:
-            ph_row_cpl = ph_res2["rows"][0]
+    # Pull joined context (includes phos name/SMILES)
+    ocj_row = None
+    if oac_code_ref2:
+        res = fetch_oac_joined(oac_code_ref2)
+        if res["ok"] and res["rows"]:
+            ocj_row = res["rows"][0]
 
+    # --- Auto-populating LOOKUP fields (dynamic keys force refresh when code changes) ---
+    dyn_suffix = oac_code_ref2 or "blank"
     cTop1, cTop2 = st.columns(2)
     with cTop1:
-        st.text_input("Lookup: Phosphine Code", value=(oc_row or {}).get("phos_code","") or "", disabled=True, key="lookup_phos_code_cpl")
-        st.text_input("Lookup: Phosphine Name", value=(ph_row_cpl or {}).get("phosphine_name","") or "", disabled=True, key="lookup_phos_name_cpl")
+        st.text_input(
+            "Lookup: Phosphine Code",
+            value=(ocj_row or {}).get("phos_code", "") or "",
+            disabled=True,
+            key=f"lookup_phos_code_cpl::{dyn_suffix}",
+        )
+        st.text_input(
+            "Lookup: Phosphine Name",
+            value=(ocj_row or {}).get("phosphine_name", "") or "",
+            disabled=True,
+            key=f"lookup_phos_name_cpl::{dyn_suffix}",
+        )
     with cTop2:
-        st.text_input("Lookup: Phosphine SMILES", value=(ph_row_cpl or {}).get("phosphine_smiles","") or "", disabled=True, key="lookup_phos_smiles_cpl")
-        st.text_input("Lookup: OAC SMILES", value=(oc_row or {}).get("oac_smiles","") or "", disabled=True, key="lookup_oac_smiles_cpl")
+        st.text_input(
+            "Lookup: Phosphine SMILES",
+            value=(ocj_row or {}).get("phosphine_smiles", "") or "",
+            disabled=True,
+            key=f"lookup_phos_smiles_cpl::{dyn_suffix}",
+        )
+        st.text_input(
+            "Lookup: OAC SMILES",
+            value=(ocj_row or {}).get("oac_smiles", "") or "",
+            disabled=True,
+            key=f"lookup_oac_smiles_cpl::{dyn_suffix}",
+        )
 
+    # --- Editable Coupling inputs ---
     coupling_type = st.selectbox("Type of reaction", options=COUPLING_TYPES, index=0, key="cpl_type")
     solvent       = st.text_input("Solvent", key="cpl_solvent")
     base_name     = st.text_input("Base name (e.g., BTMG)", key="cpl_base_name")
     base_equiv    = st.number_input("Base equivalence (optional)", min_value=0.0, value=0.0, step=0.1, key="cpl_base_equiv")
     temperature_c = st.number_input("Temperature (°C)", value=25.0, step=0.5, key="cpl_temp_c")
-    # YRTS as percentage
     yrts_pct      = st.number_input("YRTS (%)", min_value=0.0, max_value=100.0, step=0.1, key="cpl_yrts_pct")
     assay_yield   = st.number_input("Assay Yield (%)", min_value=0.0, max_value=100.0, step=0.1, key="cpl_assay_yield")
     notes_cr      = st.text_area("Notes (optional)", key="cpl_notes_in")
 
     if st.button("Save Coupling Result", type="primary", key="save_cpl_btn"):
         errs = []
-        if not solvent:
-            errs.append("Solvent is required.")
-        if temperature_c is None:
-            errs.append("Temperature is required.")
+        if not solvent: errs.append("Solvent is required.")
+        if temperature_c is None: errs.append("Temperature is required.")
         if errs:
             for e in errs: st.error(e)
         else:
             payload = {
-                "oac_code":      oac_code_ref2.strip() or None,
+                "oac_code":      oac_code_ref2 or None,
                 "coupling_type": coupling_type,
                 "solvent":       solvent,
                 "base_name":     base_name or None,
                 "base_equiv":    None if (base_equiv is None or base_equiv == 0.0) else float(base_equiv),
                 "temperature_c": float(temperature_c),
-                "yrts":          None if yrts_pct is None else float(yrts_pct),  # numeric %
+                "yrts":          None if yrts_pct is None else float(yrts_pct),  # store as numeric %
                 "assay_yield":   None if assay_yield is None else float(assay_yield),
-                "notes":         notes_cr or None
+                "notes":         notes_cr or None,
             }
-            ins = sb_request("POST","sp_coupling_results", json_body=payload)
+            ins = sb_request("POST", "sp_coupling_results", json_body=payload)
             if not ins:
                 st.error("Failed to save coupling result.")
             else:
                 st.success("Saved coupling result.")
-                if oac_code_ref2.strip():
-                    st.session_state.last_oac_code = oac_code_ref2.strip()
+                if oac_code_ref2:
+                    st.session_state.last_oac_code = oac_code_ref2
 
 # -------------------------
 # Tables
 # -------------------------
 st.markdown("---")
-st.subheader("Phosphines — `sp_phosphines`")
+st.subheader("Phosphines")
 ph_rows = sb_request(
     "GET",
     "sp_phosphines",
