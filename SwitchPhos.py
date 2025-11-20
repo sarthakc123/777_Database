@@ -342,7 +342,7 @@ with tab_oac:
 
         if not df_ph_quick.empty:
             ph_labels = [
-                f"{row['phos_code']} — {row.get('phosphine_name') or ''}"
+                f"{row.get('phosphine_name') or ''}"
                 for _, row in df_ph_quick.iterrows()
             ]
             ph_idx = st.selectbox(
@@ -459,25 +459,27 @@ with tab_oac:
 
 # ===== COUPLING =====
 with tab_coup:
-    st.subheader("Coupling Result")
-
-    # Quick pick for OAC codes (from joined view, recent first)
     with st.expander("Quick pick an OAC Code"):
         oac_quick = sb_request(
             "GET", "sp_oac_with_phosphine",
             params={
-                "select": "oac_code,phos_code,phosphine_name,oac_smiles,created_at",
+                # include bromine_name so we can show it in the label
+                "select": "oac_code,bromine_name,phosphine_name,oac_smiles,created_at",
                 "order": "created_at.desc", "limit": 200
             }
         ) or []
         df_quick = pd.DataFrame(oac_quick)
         if not df_quick.empty:
             labels = [
-                f"{row['oac_code']} — {row.get('phos_code') or ''} — {row.get('phosphine_name') or ''}"
+                f"{row['oac_code']} - {row.get('bromine_name') or ''} - {row.get('phosphine_name') or ''}"
                 for _, row in df_quick.iterrows()
             ]
-            idx = st.selectbox("Pick OAC", options=list(range(len(df_quick))),
-                               format_func=lambda i: labels[i], key="pick_oac_idx")
+            idx = st.selectbox(
+                "Pick OAC",
+                options=list(range(len(df_quick))),
+                format_func=lambda i: labels[i],
+                key="pick_oac_idx"
+            )
             if st.button("Use this OAC in Coupling tab", key="use_oac_btn"):
                 code = df_quick.iloc[idx]["oac_code"]
                 st.session_state.last_oac_code = code
@@ -485,97 +487,117 @@ with tab_coup:
         else:
             st.caption("No OAC rows to pick yet.")
 
-    # Live OAC code (typing or quick-pick both land here)
-    oac_code_ref2 = st.text_input(
-        "OAC Reaction Code (live context)",
-        value=consume_pending_or_default("cpl_oac_code_ref", st.session_state.get("last_oac_code", "")),
-        key="cpl_oac_code_ref",
-    ).strip()
+        # Live OAC code (typing or quick-pick both land here)
+        oac_code_ref2 = st.text_input(
+            "OAC Reaction Code (live context)",
+            value=consume_pending_or_default("cpl_oac_code_ref", st.session_state.get("last_oac_code", "")),
+            key="cpl_oac_code_ref",
+        ).strip()
 
-    # Pull joined context (includes phos name/SMILES)
-    ocj_row = None
-    if oac_code_ref2:
-        res = fetch_oac_joined(oac_code_ref2)
-        if res["ok"] and res["rows"]:
-            ocj_row = res["rows"][0]
+        # Pull joined context (includes phos name/SMILES)
+        ocj_row = None
+        if oac_code_ref2:
+            res = fetch_oac_joined(oac_code_ref2)
+            if res["ok"] and res["rows"]:
+                ocj_row = res["rows"][0]
 
-    # Auto-populating LOOKUP fields (read-only)
-    dyn_suffix = oac_code_ref2 or "blank"
-    cTop1, cTop2 = st.columns(2)
-    with cTop1:
-        st.text_input(
-            "Lookup: Phosphine Code",
-            value=(ocj_row or {}).get("phos_code", "") or "",
-            disabled=True,
-            key=f"lookup_phos_code_cpl::{dyn_suffix}",
-        )
-        st.text_input(
-            "Lookup: Phosphine Name",
-            value=(ocj_row or {}).get("phosphine_name", "") or "",
-            disabled=True,
-            key=f"lookup_phos_name_cpl::{dyn_suffix}",
-        )
-    with cTop2:
-        st.text_input(
-            "Lookup: Phosphine SMILES",
-            value=(ocj_row or {}).get("phosphine_smiles", "") or "",
-            disabled=True,
-            key=f"lookup_phos_smiles_cpl::{dyn_suffix}",
-        )
-        st.text_input(
-            "Lookup: OAC SMILES",
-            value=(ocj_row or {}).get("oac_smiles", "") or "",
-            disabled=True,
-            key=f"lookup_oac_smiles_cpl::{dyn_suffix}",
-        )
+        # Auto-populating LOOKUP fields (read-only)
+        dyn_suffix = oac_code_ref2 or "blank"
 
-    # Editable Coupling inputs
-    coupling_type = st.selectbox("Type of reaction", options=COUPLING_TYPES, index=0, key="cpl_type")
-    solvent       = st.text_input("Solvent", key="cpl_solvent")
-    base_name     = st.text_input("Base name (e.g., BTMG)", key="cpl_base_name")
-    base_equiv    = st.number_input("Base equivalence (optional)", min_value=0.0, value=0.0, step=0.1, key="cpl_base_equiv")
-    temperature_c = st.number_input("Temperature (°C)", value=25.0, step=0.5, key="cpl_temp_c")
-    yrts_pct      = st.number_input("YRTS (%)", min_value=0.0, max_value=100.0, step=0.1, key="cpl_yrts_pct")
-    assay_yield   = st.number_input("Assay Yield (%)", min_value=0.0, max_value=100.0, step=0.1, key="cpl_assay_yield")
-    notes_cr      = st.text_area("Notes (optional)", key="cpl_notes_in")
+        # Row 1: Phosphine + OAC SMILES
+        cTop1, cTop2 = st.columns(2)
+        with cTop1:
+            st.text_input(
+                "Lookup: Phosphine Code",
+                value=(ocj_row or {}).get("phos_code", "") or "",
+                disabled=True,
+                key=f"lookup_phos_code_cpl::{dyn_suffix}",
+            )
+            st.text_input(
+                "Lookup: Phosphine Name",
+                value=(ocj_row or {}).get("phosphine_name", "") or "",
+                disabled=True,
+                key=f"lookup_phos_name_cpl::{dyn_suffix}",
+            )
+        with cTop2:
+            st.text_input(
+                "Lookup: Phosphine SMILES",
+                value=(ocj_row or {}).get("phosphine_smiles", "") or "",
+                disabled=True,
+                key=f"lookup_phos_smiles_cpl::{dyn_suffix}",
+            )
+            st.text_input(
+                "Lookup: OAC SMILES",
+                value=(ocj_row or {}).get("oac_smiles", "") or "",
+                disabled=True,
+                key=f"lookup_oac_smiles_cpl::{dyn_suffix}",
+            )
 
-    if st.button("Save Coupling Result", type="primary", key="save_cpl_btn"):
-        errs = []
-        if not solvent: errs.append("Solvent is required.")
-        if temperature_c is None: errs.append("Temperature is required.")
-        if errs:
-            for e in errs: st.error(e)
-        else:
-            payload = {
-                "oac_code":      oac_code_ref2 or None,
-                "coupling_type": coupling_type,
-                "solvent":       solvent,
-                "base_name":     base_name or None,
-                "base_equiv":    None if (base_equiv is None or base_equiv == 0.0) else float(base_equiv),
-                "temperature_c": float(temperature_c),
-                "yrts":          None if yrts_pct is None else float(yrts_pct),
-                "assay_yield":   None if assay_yield is None else float(assay_yield),
-                "notes":         notes_cr or None,
-            }
-            ins = sb_request("POST", "sp_coupling_results", json_body=payload)
-            if not ins:
-                st.error("Failed to save coupling result.")
+        # Row 2: Bromine info from OAC
+        cBot1, cBot2 = st.columns(2)
+        with cBot1:
+            st.text_input(
+                "Lookup: Bromine Name",
+                value=(ocj_row or {}).get("bromine_name", "") or "",
+                disabled=True,
+                key=f"lookup_bromine_name_cpl::{dyn_suffix}",
+            )
+        with cBot2:
+            st.text_input(
+                "Lookup: Bromine SMILES",
+                value=(ocj_row or {}).get("bromine_smiles", "") or "",
+                disabled=True,
+                key=f"lookup_bromine_smiles_cpl::{dyn_suffix}",
+            )
+
+        # Editable Coupling inputs
+        coupling_type = st.selectbox("Type of reaction", options=COUPLING_TYPES, index=0, key="cpl_type")
+        solvent       = st.text_input("Solvent", key="cpl_solvent")
+        base_name     = st.text_input("Base name (e.g., BTMG)", key="cpl_base_name")
+        base_equiv    = st.number_input("Base equivalence (optional)", min_value=0.0, value=0.0, step=0.1, key="cpl_base_equiv")
+        temperature_c = st.number_input("Temperature (°C)", value=25.0, step=0.5, key="cpl_temp_c")
+        yrts_pct      = st.number_input("YRTS (%)", min_value=0.0, max_value=100.0, step=0.1, key="cpl_yrts_pct")
+        assay_yield   = st.number_input("Assay Yield (%)", min_value=0.0, max_value=100.0, step=0.1, key="cpl_assay_yield")
+        notes_cr      = st.text_area("Notes (optional)", key="cpl_notes_in")
+
+        if st.button("Save Coupling Result", type="primary", key="save_cpl_btn"):
+            errs = []
+            if not solvent: errs.append("Solvent is required.")
+            if temperature_c is None: errs.append("Temperature is required.")
+            if errs:
+                for e in errs: st.error(e)
             else:
-                st.success("Saved coupling result.")
-                if oac_code_ref2:
-                    st.session_state.last_oac_code = oac_code_ref2
-
+                payload = {
+                    "oac_code":      oac_code_ref2 or None,
+                    "coupling_type": coupling_type,
+                    "solvent":       solvent,
+                    "base_name":     base_name or None,
+                    "base_equiv":    None if (base_equiv is None or base_equiv == 0.0) else float(base_equiv),
+                    "temperature_c": float(temperature_c),
+                    "yrts":          None if yrts_pct is None else float(yrts_pct),
+                    "assay_yield":   None if assay_yield is None else float(assay_yield),
+                    "notes":         notes_cr or None,
+                }
+                ins = sb_request("POST", "sp_coupling_results", json_body=payload)
+                if not ins:
+                    st.error("Failed to save coupling result.")
+                else:
+                    st.success("Saved coupling result.")
+                    if oac_code_ref2:
+                        st.session_state.last_oac_code = oac_code_ref2
 # -------------------------
 # Tables (UNMASKED DISPLAY)
 # -------------------------
 st.markdown("---")
 st.subheader("Phosphines")
+
 ph_rows = sb_request(
     "GET",
     "sp_phosphines",
     params={"select":"phos_code,phosphine_name,phosphine_smiles,notes,created_at",
             "order":"created_at.desc","limit":200}
 ) or []
+
 df_ph = pd.DataFrame(ph_rows)
 
 if df_ph.empty:
@@ -588,17 +610,26 @@ else:
         "notes":"Notes",
         "created_at":"Created_UTC"
     })
-    # UNMASKED: show all columns
-    st.dataframe(df_ph_view, use_container_width=True, hide_index=True)
 
+    # EXACT COLUMN ORDER YOU PASTED
+    ph_order = [
+        "Phos_Code", "Phosphine_Name", "Phosphine_SMILES",
+        "Notes", "Created_UTC"
+    ]
+    st.dataframe(df_ph_view[ph_order], use_container_width=True, hide_index=True)
+
+
+# -------------------------
 st.markdown("---")
 st.subheader("OAC (joined with Phosphine)")
+
 oac_joined = sb_request(
     "GET",
     "sp_oac_with_phosphine",
     params={"select":"oac_code,phos_code,phosphine_name,phosphine_smiles,oac_smiles,bromine_name,bromine_smiles,notes,created_at",
             "order":"created_at.desc","limit":200}
 ) or []
+
 df_oacj = pd.DataFrame(oac_joined)
 
 if df_oacj.empty:
@@ -609,23 +640,33 @@ else:
         "phos_code":"Phos_Code",
         "phosphine_name":"Phosphine_Name",
         "phosphine_smiles":"Phosphine_SMILES",
-        "oac_smiles":"OAC_SMILES",
         "bromine_name":"Bromine_Name",
         "bromine_smiles":"Bromine_SMILES",
+        "oac_smiles":"OAC_SMILES",
         "notes":"Notes",
         "created_at":"Created_UTC"
     })
-    # UNMASKED: show all columns
-    st.dataframe(df_oacj_view, use_container_width=True, hide_index=True)
 
+    # EXACT ORDER YOU PASTED
+    oac_order = [
+        "OAC_Code", "Phos_Code", "Phosphine_Name", "Phosphine_SMILES",
+        "OAC_SMILES", "Bromine_Name", "Bromine_SMILES",
+        "Notes", "Created_UTC"
+    ]
+    st.dataframe(df_oacj_view[oac_order], use_container_width=True, hide_index=True)
+
+
+# -------------------------
 st.markdown("---")
 st.subheader("Coupling Result (full joined)")
+
 cpl_full = sb_request(
     "GET",
     "sp_coupling_full",
     params={"select":"id,oac_code,coupling_type,solvent,base_name,base_equiv,temperature_c,yrts,assay_yield,notes,created_at,phos_code,oac_smiles,bromine_name,bromine_smiles,phosphine_name,phosphine_smiles",
             "order":"created_at.desc","limit":200}
 ) or []
+
 df_cplf = pd.DataFrame(cpl_full)
 
 if df_cplf.empty:
@@ -634,6 +675,10 @@ else:
     df_cplf_view = df_cplf.rename(columns={
         "id":"ID",
         "oac_code":"OAC_Code",
+        "bromine_name":"Bromine_Name",
+        "bromine_smiles":"Bromine_SMILES",
+        "phosphine_name":"Phosphine_Name",
+        "phosphine_smiles":"Phosphine_SMILES",
         "phos_code":"Phos_Code",
         "coupling_type":"Type",
         "solvent":"Solvent",
@@ -643,23 +688,29 @@ else:
         "notes":"Notes",
         "created_at":"Created_UTC",
         "oac_smiles":"OAC_SMILES",
-        "bromine_name":"Bromine_Name",
-        "bromine_smiles":"Bromine_SMILES",
-        "phosphine_name":"Phosphine_Name",
-        "phosphine_smiles":"Phosphine_SMILES"
     })
-    # UNMASKED: show all columns
-    st.dataframe(df_cplf_view, use_container_width=True, hide_index=True)
+
+    # EXACT ORDER YOU PASTED
+    cpl_order = [
+        "ID", "OAC_Code", "Phos_Code", "Phosphine_Name", "Bromine_Name", "Phosphine_SMILES",
+        "Bromine_SMILES", "OAC_SMILES",
+        "Type", "Solvent", "base_name", "base_equiv",
+        "Temp_C", "YRTS_pct", "Assay_Yield_pct",
+        "Notes", "Created_UTC"
+    ]
+
+    st.dataframe(df_cplf_view[cpl_order], use_container_width=True, hide_index=True)
+
 
 # -------------------------
-# Sidebar exports (FULL, unmasked)
+# Sidebar exports
 # -------------------------
 with st.sidebar:
     st.markdown("---")
     st.header("Export")
     if not df_ph.empty:
-        st.download_button("phosphines.csv", df_ph.to_csv(index=False).encode("utf-8"), "phosphines.csv", "text/csv")
+        st.download_button("phosphines.csv", df_ph.to_csv(index=False).encode(), "phosphines.csv")
     if not df_oacj.empty:
-        st.download_button("oac_joined.csv", df_oacj.to_csv(index=False).encode("utf-8"), "oac_joined.csv", "text/csv")
+        st.download_button("oac_joined.csv", df_oacj.to_csv(index=False).encode(), "oac_joined.csv")
     if not df_cplf.empty:
-        st.download_button("coupling_full.csv", df_cplf.to_csv(index=False).encode("utf-8"), "coupling_full.csv", "text/csv")
+        st.download_button("coupling_full.csv", df_cplf.to_csv(index=False).encode(), "coupling_full.csv")
