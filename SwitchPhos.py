@@ -178,6 +178,18 @@ def fetch_oac(oac_code: str) -> Dict[str, Any]:
     rows = parsed if isinstance(parsed, list) else []
     return {"ok": status in (200,206), "status": status, "rows": rows, "msg": raw[:2000]}
 
+def phosphine_exists(code: str) -> bool:
+    if not code:
+        return False
+    res = fetch_phosphine(code.strip())
+    return bool(res and res.get("ok") and len(res.get("rows", [])) > 0)
+
+def oac_exists(code: str) -> bool:
+    if not code:
+        return False
+    res = fetch_oac(code.strip())
+    return bool(res and res.get("ok") and len(res.get("rows", [])) > 0)
+
 # ---- Safe "push to another input" helpers ----
 def push_for_next_run(target_key: str, value):
     """Store a value to be applied to a widget on the next run, then rerun."""
@@ -283,24 +295,25 @@ with tab_phos:
         if not (phos_name or phos_smiles):
             errs.append("Enter at least a Name or a SMILES.")
         if errs:
-            for e in errs: st.error(e)
+            for e in errs:
+                st.error(e)
         else:
-            payload = {
-                "phos_code": phos_code_in.strip(),
-                "phosphine_name": phos_name or None,
-                "phosphine_smiles": canon(phos_smiles or None),
-                "notes": phos_notes or None
-            }
-            ins = sb_request("POST","sp_phosphines", json_body=payload)
-            if not ins:
-                upd = sb_request("PATCH","sp_phosphines", json_body=payload, params={"phos_code": f"eq.{phos_code_in.strip()}"})
-                if not upd:
+            # HARD STOP if this code already exists
+            if phosphine_exists(phos_code_in):
+                st.warning(f"Phosphine code '{phos_code_in.strip()}' already exists. Not overwriting. Use a new code.")
+            else:
+                payload = {
+                    "phos_code": phos_code_in.strip(),
+                    "phosphine_name": phos_name or None,
+                    "phosphine_smiles": canon(phos_smiles or None),
+                    "notes": phos_notes or None
+                }
+                ins = sb_request("POST", "sp_phosphines", json_body=payload)
+                if not ins:
                     st.error("Failed to save phosphine.")
                 else:
-                    st.success(f"Updated phosphine {phos_code_in.strip()}.")
-            else:
-                st.success(f"Saved phosphine {phos_code_in.strip()}.")
-            st.session_state.last_phos_code = phos_code_in.strip()
+                    st.success(f"Saved phosphine {phos_code_in.strip()}.")
+                    st.session_state.last_phos_code = phos_code_in.strip()
 
     st.divider()
     st.markdown("**Live Preview by Code**")
@@ -420,29 +433,29 @@ with tab_oac:
             if not oac_code_in.strip():
                 errs.append("OAC Reaction Code is required.")
             if errs:
-                for e in errs: st.error(e)
+                for e in errs:
+                    st.error(e)
             else:
-                payload = {
-                    "oac_code": oac_code_in.strip(),
-                    "phos_code": phos_code_ref.strip() or None,
-                    "oac_smiles": canon(oac_smiles or None),
-                    "bromine_name": bromine_name or None,
-                    "bromine_smiles": canon(bromine_smiles or None),
-                    "notes": oac_notes or None
-                }
-                ins = sb_request("POST", "sp_oac_reactions", json_body=payload)
-                if not ins:
-                    upd = sb_request("PATCH", "sp_oac_reactions", json_body=payload,
-                                     params={"oac_code": f"eq.{oac_code_in.strip()}"})
-                    if not upd:
+                # HARD STOP if this code already exists
+                if oac_exists(oac_code_in):
+                    st.warning(f"OAC code '{oac_code_in.strip()}' already exists. Not overwriting. Use a new code.")
+                else:
+                    payload = {
+                        "oac_code": oac_code_in.strip(),
+                        "phos_code": phos_code_ref.strip() or None,
+                        "oac_smiles": canon(oac_smiles or None),
+                        "bromine_name": bromine_name or None,
+                        "bromine_smiles": canon(bromine_smiles or None),
+                        "notes": oac_notes or None
+                    }
+                    ins = sb_request("POST", "sp_oac_reactions", json_body=payload)
+                    if not ins:
                         st.error("Failed to save OAC reaction.")
                     else:
-                        st.success(f"Updated OAC {oac_code_in.strip()}.")
-                else:
-                    st.success(f"Saved OAC {oac_code_in.strip()}.")
-                st.session_state.last_oac_code = oac_code_in.strip()
-                if phos_code_ref.strip():
-                    st.session_state.last_phos_code = phos_code_ref.strip()
+                        st.success(f"Saved OAC {oac_code_in.strip()}.")
+                        st.session_state.last_oac_code = oac_code_in.strip()
+                        if phos_code_ref.strip():
+                            st.session_state.last_phos_code = phos_code_ref.strip()
 
 # ===== COUPLING =====
 with tab_coup:
