@@ -414,11 +414,7 @@ with tab_oac:
             )
 
         # These now “consume pending” values that the OAC code on_change callback sets
-        oac_smiles = st.text_input(
-            "OAC SMILES",
-            value=consume_pending_or_default("oac_smiles_in", ""),
-            key="oac_smiles_in",
-        )
+
         bromine_name = st.text_input(
             "Bromine Name",
             value=consume_pending_or_default("oac_bromine_name_in", ""),
@@ -428,6 +424,11 @@ with tab_oac:
             "Bromine SMILES",
             value=consume_pending_or_default("oac_bromine_smiles_in", ""),
             key="oac_bromine_smiles_in",
+        )
+        oac_smiles = st.text_input(
+            "OAC SMILES",
+            value=consume_pending_or_default("oac_smiles_in", ""),
+            key="oac_smiles_in",
         )
         oac_notes = st.text_area(
             "Notes (optional)",
@@ -495,6 +496,11 @@ with tab_coup:
         else:
             st.caption("No OAC rows to pick yet.")
 
+        coup_rxn_name = st.text_input(
+            "Coupling Reaction Name",
+            key="cpl_coup_rxn_name"
+        )
+
         # Live OAC code (typing or quick-pick both land here)
         oac_code_ref2 = st.text_input(
             "OAC Reaction Code (live context)",
@@ -502,10 +508,6 @@ with tab_coup:
             key="cpl_oac_code_ref",
         ).strip()
 
-        coup_rxn_name = st.text_input(
-            "Coupling Reaction Name",
-            key="cpl_coup_rxn_name"
-        )
 
         # Pull joined context (includes phos name/SMILES)
         ocj_row = None
@@ -816,16 +818,16 @@ else:
 
     # EXACT ORDER YOU PASTED
     cpl_order = [
-        "OAC_Code",
         "Coup_Rxn_Name",
+        "OAC_Code",
         "OAC_Rxn_Name",
-        "Phos_Code",
-        "Phos_Rxn_Name",
-        "Phosphine_Name",
-        "Phosphine_SMILES",
         "OAC_SMILES",
         "Bromine_Name",
         "Bromine_SMILES",
+        "Phosphine_Name",
+        "Phosphine_SMILES",
+        "Phos_Code",
+        "Phos_Rxn_Name",
         "Nucleophile_Name",
         "Nucleophile_SMILES",
         "Type",
