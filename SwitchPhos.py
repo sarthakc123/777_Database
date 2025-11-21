@@ -161,7 +161,7 @@ def fetch_phosphine(phos_code: str) -> Dict[str, Any]:
         return {"ok": False, "status": None, "rows": [], "msg": "empty code"}
     status, raw, parsed = sb_get_verbose(
         "sp_phosphines",
-        params={"select":"phos_code,phosphine_name,phosphine_smiles,notes",
+        params={"select":"phos_code,phos_rxn_name,phosphine_name,phosphine_smiles,notes,created_at",
                 "phos_code":f"eq.{phos_code.strip()}"}
     )
     rows = parsed if isinstance(parsed, list) else []
@@ -233,7 +233,9 @@ def fetch_oac_joined(oac_code: str):
     status, raw, parsed = sb_get_verbose(
         "sp_oac_with_phosphine",
         params={
-            "select": "oac_code,phos_code,phosphine_name,phosphine_smiles,oac_smiles,bromine_name,bromine_smiles,notes",
+            "select": "oac_code,phos_code,phosphine_name,phosphine_smiles,"
+                      "phos_rxn_name,oac_smiles,bromine_name,bromine_smiles,"
+                      "oac_rxn_name,notes",
             "oac_code": f"eq.{oac_code.strip()}",
             "limit": 1
         }
@@ -284,6 +286,7 @@ tab_phos, tab_oac, tab_coup = st.tabs(["Phosphine", "OAC Reaction", "Coupling Re
 with tab_phos:
     st.subheader("Phosphine")
     phos_code_in = st.text_input("Phosphine Code (required)", value=st.session_state.get("last_phos_code",""), key="phos_code_in")
+    phos_rxn_name = st.text_input("Phosphine Reaction Name", key="phos_rxn_name_in")
     phos_name    = st.text_input("Phosphine Name", key="phos_name_in")
     phos_smiles  = st.text_input("Phosphine SMILES", key="phos_smiles_in")
     phos_notes   = st.text_area("Notes (optional)", key="phos_notes_in")
@@ -304,6 +307,7 @@ with tab_phos:
             else:
                 payload = {
                     "phos_code": phos_code_in.strip(),
+                    "phos_rxn_name": phos_rxn_name or None,
                     "phosphine_name": phos_name or None,
                     "phosphine_smiles": canon(phos_smiles or None),
                     "notes": phos_notes or None
@@ -335,7 +339,7 @@ with tab_oac:
         ph_quick = sb_request(
             "GET",
             "sp_phosphines",
-            params={"select": "phos_code,phosphine_name,phosphine_smiles,created_at",
+            params={"select": "phos_code,phos_rxn_name,phosphine_name,phosphine_smiles,notes",
                     "order": "created_at.desc", "limit": 200}
         ) or []
         df_ph_quick = pd.DataFrame(ph_quick)
@@ -363,6 +367,9 @@ with tab_oac:
                 st.rerun()
         else:
             st.caption("No phosphines to pick yet.")
+
+        #OAC Reaction Name input
+        oac_rxn_name = st.text_input("OAC Reaction Name", key="oac_rxn_name_in")
 
         # OAC code input — attach on_change callback
         oac_code_in = st.text_input(
@@ -446,6 +453,7 @@ with tab_oac:
                         "oac_smiles": canon(oac_smiles or None),
                         "bromine_name": bromine_name or None,
                         "bromine_smiles": canon(bromine_smiles or None),
+                        "oac_rxn_name": oac_rxn_name or None,
                         "notes": oac_notes or None
                     }
                     ins = sb_request("POST", "sp_oac_reactions", json_body=payload)
@@ -493,6 +501,11 @@ with tab_coup:
             value=consume_pending_or_default("cpl_oac_code_ref", st.session_state.get("last_oac_code", "")),
             key="cpl_oac_code_ref",
         ).strip()
+
+        coup_rxn_name = st.text_input(
+            "Coupling Reaction Name",
+            key="cpl_coup_rxn_name"
+        )
 
         # Pull joined context (includes phos name/SMILES)
         ocj_row = None
@@ -551,32 +564,89 @@ with tab_coup:
             )
 
         # Editable Coupling inputs
-        coupling_type = st.selectbox("Type of reaction", options=COUPLING_TYPES, index=0, key="cpl_type")
-        solvent       = st.text_input("Solvent", key="cpl_solvent")
-        base_name     = st.text_input("Base name (e.g., BTMG)", key="cpl_base_name")
-        base_equiv    = st.number_input("Base equivalence (optional)", min_value=0.0, value=0.0, step=0.1, key="cpl_base_equiv")
-        temperature_c = st.number_input("Temperature (°C)", value=25.0, step=0.5, key="cpl_temp_c")
-        yrts_pct      = st.number_input("YRTS (%)", min_value=0.0, max_value=100.0, step=0.1, key="cpl_yrts_pct")
-        assay_yield   = st.number_input("Assay Yield (%)", min_value=0.0, max_value=100.0, step=0.1, key="cpl_assay_yield")
-        notes_cr      = st.text_area("Notes (optional)", key="cpl_notes_in")
+
+        # NEW: Nucleophile (coupling partner) before type of reaction
+        nucleophile_name = st.text_input(
+            "Nucleophile Name (Coupling Partner)",
+            key="cpl_nucleophile_name"
+        )
+        nucleophile_smiles = st.text_input(
+            "Nucleophile SMILES",
+            key="cpl_nucleophile_smiles"
+        )
+
+        coupling_type = st.selectbox(
+            "Type of reaction",
+            options=COUPLING_TYPES,
+            index=0,
+            key="cpl_type"
+        )
+        solvent = st.text_input("Solvent", key="cpl_solvent")
+        base_name = st.text_input("Base name (e.g., BTMG)", key="cpl_base_name")
+        base_equiv = st.number_input(
+            "Base equivalence (optional)",
+            min_value=0.0,
+            value=0.0,
+            step=0.1,
+            key="cpl_base_equiv"
+        )
+        temperature_c = st.number_input(
+            "Temperature (°C)",
+            value=25.0,
+            step=0.5,
+            key="cpl_temp_c"
+        )
+
+        # NEW: Reaction time right after temperature
+        reaction_time_h = st.number_input(
+            "Reaction Time (hours)",
+            min_value=0.0,
+            value=0.0,
+            step=0.1,
+            key="cpl_reaction_time_h"
+        )
+
+        yrts_pct = st.number_input(
+            "YRTS (%)",
+            min_value=0.0,
+            max_value=100.0,
+            step=0.1,
+            key="cpl_yrts_pct"
+        )
+        assay_yield = st.number_input(
+            "Assay Yield (%)",
+            min_value=0.0,
+            max_value=100.0,
+            step=0.1,
+            key="cpl_assay_yield"
+        )
+        notes_cr = st.text_area("Notes (optional)", key="cpl_notes_in")
 
         if st.button("Save Coupling Result", type="primary", key="save_cpl_btn"):
             errs = []
-            if not solvent: errs.append("Solvent is required.")
-            if temperature_c is None: errs.append("Temperature is required.")
+            if not solvent:
+                errs.append("Solvent is required.")
+            if temperature_c is None:
+                errs.append("Temperature is required.")
             if errs:
-                for e in errs: st.error(e)
+                for e in errs:
+                    st.error(e)
             else:
                 payload = {
-                    "oac_code":      oac_code_ref2 or None,
+                    "oac_code": oac_code_ref2 or None,
+                    "coup_rxn_name": coup_rxn_name or None,
                     "coupling_type": coupling_type,
-                    "solvent":       solvent,
-                    "base_name":     base_name or None,
-                    "base_equiv":    None if (base_equiv is None or base_equiv == 0.0) else float(base_equiv),
+                    "solvent": solvent,
+                    "base_name": base_name or None,
+                    "base_equiv": None if (base_equiv is None or base_equiv == 0.0) else float(base_equiv),
                     "temperature_c": float(temperature_c),
-                    "yrts":          None if yrts_pct is None else float(yrts_pct),
-                    "assay_yield":   None if assay_yield is None else float(assay_yield),
-                    "notes":         notes_cr or None,
+                    "reaction_time_hours": None if reaction_time_h is None or reaction_time_h == 0.0 else float(
+                        reaction_time_h),
+                    "yrts": None if yrts_pct is None else float(yrts_pct),
+                    "assay_yield": None if assay_yield is None else float(assay_yield),
+                    "nucleophile_name": nucleophile_name or None,
+                    "nucleophile_smiles": canon(nucleophile_smiles or None),
+                    "notes": notes_cr or None,
                 }
                 ins = sb_request("POST", "sp_coupling_results", json_body=payload)
                 if not ins:
@@ -585,8 +655,10 @@ with tab_coup:
                     st.success("Saved coupling result.")
                     if oac_code_ref2:
                         st.session_state.last_oac_code = oac_code_ref2
+
 # -------------------------
 # Tables (UNMASKED DISPLAY)
+# -------------------------
 # -------------------------
 st.markdown("---")
 st.subheader("Phosphines")
@@ -594,8 +666,12 @@ st.subheader("Phosphines")
 ph_rows = sb_request(
     "GET",
     "sp_phosphines",
-    params={"select":"phos_code,phosphine_name,phosphine_smiles,notes,created_at",
-            "order":"created_at.desc","limit":200}
+    params={
+        # 🔴 IMPORTANT: include phos_rxn_name in the select
+        "select": "phos_code,phos_rxn_name,phosphine_name,phosphine_smiles,notes,created_at",
+        "order": "created_at.desc",
+        "limit": 200,
+    },
 ) or []
 
 df_ph = pd.DataFrame(ph_rows)
@@ -603,31 +679,54 @@ df_ph = pd.DataFrame(ph_rows)
 if df_ph.empty:
     st.info("No phosphines yet.")
 else:
-    df_ph_view = df_ph.rename(columns={
-        "phos_code":"Phos_Code",
-        "phosphine_name":"Phosphine_Name",
-        "phosphine_smiles":"Phosphine_SMILES",
-        "notes":"Notes",
-        "created_at":"Created_UTC"
-    })
+    # Map DB columns -> UI columns (including reaction name)
+    df_ph_view = df_ph.rename(
+        columns={
+            "phos_code": "Phos_Code",
+            "phos_rxn_name": "Phos_Rxn_Name",
+            "phosphine_name": "Phosphine_Name",
+            "phosphine_smiles": "Phosphine_SMILES",
+            "notes": "Notes",
+            "created_at": "Created_UTC",
+        }
+    )
 
-    # EXACT COLUMN ORDER YOU PASTED
+    # Desired order
     ph_order = [
-        "Phos_Code", "Phosphine_Name", "Phosphine_SMILES",
-        "Notes", "Created_UTC"
+        "Phos_Code",
+        "Phos_Rxn_Name",      # <- new reaction name column
+        "Phosphine_Name",
+        "Phosphine_SMILES",
+        "Notes",
+        "Created_UTC",
     ]
-    st.dataframe(df_ph_view[ph_order], use_container_width=True, hide_index=True)
+
+    # 🚑 Guard against missing columns to avoid KeyError
+    available_cols = [c for c in ph_order if c in df_ph_view.columns]
+    missing_cols = [c for c in ph_order if c not in df_ph_view.columns]
+
+    if missing_cols:
+        st.warning(
+            f"Phosphines view: these columns are missing from Supabase and were not shown: {missing_cols}"
+        )
+
+    st.dataframe(df_ph_view[available_cols], use_container_width=True, hide_index=True)
 
 
-# -------------------------
 st.markdown("---")
 st.subheader("OAC (joined with Phosphine)")
 
 oac_joined = sb_request(
     "GET",
     "sp_oac_with_phosphine",
-    params={"select":"oac_code,phos_code,phosphine_name,phosphine_smiles,oac_smiles,bromine_name,bromine_smiles,notes,created_at",
-            "order":"created_at.desc","limit":200}
+    params={
+        "select": "oac_code,phos_code,phos_rxn_name,oac_rxn_name,"
+                  "phosphine_name,phosphine_smiles,"
+                  "oac_smiles,bromine_name,bromine_smiles,"
+                  "notes,created_at",
+        "order": "created_at.desc",
+        "limit": 200,
+    }
 ) or []
 
 df_oacj = pd.DataFrame(oac_joined)
@@ -636,23 +735,37 @@ if df_oacj.empty:
     st.info("No OAC rows yet.")
 else:
     df_oacj_view = df_oacj.rename(columns={
-        "oac_code":"OAC_Code",
-        "phos_code":"Phos_Code",
-        "phosphine_name":"Phosphine_Name",
+        "oac_code":        "OAC_Code",
+        "phos_code":       "Phos_Code",
+        "phos_rxn_name":   "Phos_Rxn_Name",   # from phosphine table
+        "oac_rxn_name":    "OAC_Rxn_Name",    # from OAC table
+        "phosphine_name":  "Phosphine_Name",
         "phosphine_smiles":"Phosphine_SMILES",
-        "bromine_name":"Bromine_Name",
-        "bromine_smiles":"Bromine_SMILES",
-        "oac_smiles":"OAC_SMILES",
-        "notes":"Notes",
-        "created_at":"Created_UTC"
+        "oac_smiles":      "OAC_SMILES",
+        "bromine_name":    "Bromine_Name",
+        "bromine_smiles":  "Bromine_SMILES",
+        "notes":           "Notes",
+        "created_at":      "Created_UTC",
     })
 
-    # EXACT ORDER YOU PASTED
+    # EXACT ORDER (make sure all appear above in rename)
     oac_order = [
-        "OAC_Code", "Phos_Code", "Phosphine_Name", "Phosphine_SMILES",
-        "OAC_SMILES", "Bromine_Name", "Bromine_SMILES",
-        "Notes", "Created_UTC"
+        "OAC_Code",
+        "Phos_Code",
+        "Phos_Rxn_Name",
+        "OAC_Rxn_Name",
+        "Phosphine_Name",
+        "Phosphine_SMILES",
+        "OAC_SMILES",
+        "Bromine_Name",
+        "Bromine_SMILES",
+        "Notes",
+        "Created_UTC",
     ]
+
+    # Optional debug if it still complains:
+    # st.write("OAC columns:", df_oacj_view.columns.tolist())
+
     st.dataframe(df_oacj_view[oac_order], use_container_width=True, hide_index=True)
 
 
@@ -663,7 +776,11 @@ st.subheader("Coupling Result (full joined)")
 cpl_full = sb_request(
     "GET",
     "sp_coupling_full",
-    params={"select":"id,oac_code,coupling_type,solvent,base_name,base_equiv,temperature_c,yrts,assay_yield,notes,created_at,phos_code,oac_smiles,bromine_name,bromine_smiles,phosphine_name,phosphine_smiles",
+    params={"select":"id,oac_code,coup_rxn_name,coupling_type,solvent,base_name,base_equiv,"
+                     "temperature_c,reaction_time_hours,yrts,assay_yield,nucleophile_name,"
+                     "nucleophile_smiles,notes,created_at,phos_code,phos_rxn_name,"
+                     "oac_smiles,oac_rxn_name,bromine_name,bromine_smiles,"
+                     "phosphine_name,phosphine_smiles",
             "order":"created_at.desc","limit":200}
 ) or []
 
@@ -673,32 +790,57 @@ if df_cplf.empty:
     st.info("No coupling results yet.")
 else:
     df_cplf_view = df_cplf.rename(columns={
-        "id":"ID",
-        "oac_code":"OAC_Code",
-        "bromine_name":"Bromine_Name",
-        "bromine_smiles":"Bromine_SMILES",
-        "phosphine_name":"Phosphine_Name",
-        "phosphine_smiles":"Phosphine_SMILES",
-        "phos_code":"Phos_Code",
-        "coupling_type":"Type",
-        "solvent":"Solvent",
-        "temperature_c":"Temp_C",
-        "yrts":"YRTS_pct",
-        "assay_yield":"Assay_Yield_pct",
-        "notes":"Notes",
-        "created_at":"Created_UTC",
-        "oac_smiles":"OAC_SMILES",
+        "id": "ID",
+        "oac_code": "OAC_Code",
+        "coup_rxn_name": "Coup_Rxn_Name",
+        "phos_code": "Phos_Code",
+        "phos_rxn_name": "Phos_Rxn_Name",
+        "phosphine_name": "Phosphine_Name",
+        "phosphine_smiles": "Phosphine_SMILES",
+        "oac_smiles": "OAC_SMILES",
+        "oac_rxn_name": "OAC_Rxn_Name",
+        "bromine_name": "Bromine_Name",
+        "bromine_smiles": "Bromine_SMILES",
+        "nucleophile_name": "Nucleophile_Name",
+        "nucleophile_smiles": "Nucleophile_SMILES",
+        "coupling_type": "Type",
+        "solvent": "Solvent",
+        "base_name": "Base_Name",
+        "base_equiv": "Base_Equiv",
+        "temperature_c": "Temp_C",
+        "reaction_time_hours": "Reaction_Time_h",
+        "yrts": "YRTS_pct",
+        "assay_yield": "Assay_Yield_pct",
+        "notes": "Notes",
+        "created_at": "Created_UTC",
     })
 
     # EXACT ORDER YOU PASTED
     cpl_order = [
-        "ID", "OAC_Code", "Phos_Code", "Phosphine_Name", "Bromine_Name", "Phosphine_SMILES",
-        "Bromine_SMILES", "OAC_SMILES",
-        "Type", "Solvent", "base_name", "base_equiv",
-        "Temp_C", "YRTS_pct", "Assay_Yield_pct",
-        "Notes", "Created_UTC"
+        "ID",
+        "OAC_Code",
+        "Coup_Rxn_Name",
+        "OAC_Rxn_Name",
+        "Phos_Code",
+        "Phos_Rxn_Name",
+        "Phosphine_Name",
+        "Phosphine_SMILES",
+        "OAC_SMILES",
+        "Bromine_Name",
+        "Bromine_SMILES",
+        "Nucleophile_Name",
+        "Nucleophile_SMILES",
+        "Type",
+        "Solvent",
+        "Base_Name",
+        "Base_Equiv",
+        "Temp_C",
+        "Reaction_Time_h",
+        "YRTS_pct",
+        "Assay_Yield_pct",
+        "Notes",
+        "Created_UTC",
     ]
-
     st.dataframe(df_cplf_view[cpl_order], use_container_width=True, hide_index=True)
 
 
