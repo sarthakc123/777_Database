@@ -369,7 +369,11 @@ with tab_oac:
             st.caption("No phosphines to pick yet.")
 
         #OAC Reaction Name input
-        oac_rxn_name = st.text_input("OAC Reaction Name", key="oac_rxn_name_in")
+        oac_rxn_name = st.text_input(
+            "OAC Reaction Name",
+            value=consume_pending_or_default("oac_rxn_name_in", ""),
+            key="oac_rxn_name_in",
+        )
 
         # OAC code input — attach on_change callback
         oac_code_in = st.text_input(
@@ -466,6 +470,16 @@ with tab_oac:
                         if phos_code_ref.strip():
                             st.session_state.last_phos_code = phos_code_ref.strip()
 
+                        # 🔹 Clear only these fields next run:
+                        st.session_state["_pending_oac_code_in"] = ""  # OAC Reaction Code
+                        st.session_state["_pending_oac_rxn_name_in"] = ""  # OAC Reaction Name
+                        st.session_state["_pending_oac_bromine_name_in"] = ""  # Bromine Name
+                        st.session_state["_pending_oac_bromine_smiles_in"] = ""  # Bromine SMILES
+                        st.session_state["_pending_oac_smiles_in"] = ""  # OAC SMILES
+                        st.session_state["_pending_oac_notes_in"] = ""  # Notes
+
+                        st.rerun()
+
 # ===== COUPLING =====
 with tab_coup:
     with st.expander("Quick pick an OAC Code"):
@@ -498,7 +512,8 @@ with tab_coup:
 
         coup_rxn_name = st.text_input(
             "Coupling Reaction Name",
-            key="cpl_coup_rxn_name"
+            value=consume_pending_or_default("cpl_coup_rxn_name", ""),
+            key="cpl_coup_rxn_name",
         )
 
         # Live OAC code (typing or quick-pick both land here)
@@ -657,6 +672,11 @@ with tab_coup:
                     st.success("Saved coupling result.")
                     if oac_code_ref2:
                         st.session_state.last_oac_code = oac_code_ref2
+
+                    # 🔹 Clear only Coupling Reaction Name (keep everything else intact)
+                    st.session_state["_pending_cpl_coup_rxn_name"] = ""
+
+                    st.rerun()
 
 # -------------------------
 # Tables (UNMASKED DISPLAY)
