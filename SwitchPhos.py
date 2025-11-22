@@ -624,9 +624,9 @@ with tab_coup:
         )
 
         yrts_pct = st.number_input(
-            "YRTS (%)",
+            "YRTS",
             min_value=0.0,
-            max_value=100.0,
+            max_value=500.0,
             step=0.1,
             key="cpl_yrts_pct"
         )
@@ -831,7 +831,7 @@ else:
         "base_equiv": "Base_Equiv",
         "temperature_c": "Temp_C",
         "reaction_time_hours": "Reaction_Time_h",
-        "yrts": "YRTS_pct",
+        "yrts": "YRTS",
         "assay_yield": "Assay_Yield_pct",
         "notes": "Notes",
         "created_at": "Created_UTC",
@@ -858,7 +858,7 @@ else:
         "Base_Equiv",
         "Temp_C",
         "Reaction_Time_h",
-        "YRTS_pct",
+        "YRTS",
         "Assay_Yield_pct",
         "Notes",
         "Created_UTC",
