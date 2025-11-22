@@ -812,6 +812,7 @@ if df_cplf.empty:
     st.info("No coupling results yet.")
 else:
     df_cplf_view = df_cplf.rename(columns={
+        "id": "ID",
         "oac_code": "OAC_Code",
         "coup_rxn_name": "Coup_Rxn_Name",
         "phos_code": "Phos_Code",
@@ -838,6 +839,7 @@ else:
 
     # EXACT ORDER YOU PASTED
     cpl_order = [
+        "ID",
         "Coup_Rxn_Name",
         "OAC_Code",
         "OAC_Rxn_Name",
