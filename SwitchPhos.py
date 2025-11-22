@@ -516,6 +516,11 @@ with tab_coup:
             key="cpl_coup_rxn_name",
         )
 
+        product_name = st.text_input(
+            "Product Name",
+            key="cpl_product_name"
+        )
+
         # Live OAC code (typing or quick-pick both land here)
         oac_code_ref2 = st.text_input(
             "OAC Reaction Code (live context)",
@@ -663,6 +668,7 @@ with tab_coup:
                     "assay_yield": None if assay_yield is None else float(assay_yield),
                     "nucleophile_name": nucleophile_name or None,
                     "nucleophile_smiles": canon(nucleophile_smiles or None),
+                    "product_name": product_name or None,  # 🔹 NEW
                     "notes": notes_cr or None,
                 }
                 ins = sb_request("POST", "sp_coupling_results", json_body=payload)
@@ -798,12 +804,12 @@ st.subheader("Coupling Result (full joined)")
 cpl_full = sb_request(
     "GET",
     "sp_coupling_full",
-    params={"select":"id,oac_code,coup_rxn_name,coupling_type,solvent,base_name,base_equiv,"
-                     "temperature_c,reaction_time_hours,yrts,assay_yield,nucleophile_name,"
-                     "nucleophile_smiles,notes,created_at,phos_code,phos_rxn_name,"
-                     "oac_smiles,oac_rxn_name,bromine_name,bromine_smiles,"
-                     "phosphine_name,phosphine_smiles",
-            "order":"created_at.desc","limit":200}
+    params={"select": "id,oac_code,coup_rxn_name,coupling_type,solvent,base_name,base_equiv,"
+                      "temperature_c,reaction_time_hours,yrts,assay_yield,nucleophile_name,"
+                      "nucleophile_smiles,product_name,notes,created_at,phos_code,phos_rxn_name,"
+                      "oac_smiles,oac_rxn_name,bromine_name,bromine_smiles,"
+                      "phosphine_name,phosphine_smiles",
+            "order": "created_at.desc", "limit": 200}
 ) or []
 
 df_cplf = pd.DataFrame(cpl_full)
@@ -815,6 +821,7 @@ else:
         "id": "ID",
         "oac_code": "OAC_Code",
         "coup_rxn_name": "Coup_Rxn_Name",
+        "product_name": "Product_Name",
         "phos_code": "Phos_Code",
         "phos_rxn_name": "Phos_Rxn_Name",
         "phosphine_name": "Phosphine_Name",
@@ -841,6 +848,7 @@ else:
     cpl_order = [
         "ID",
         "Coup_Rxn_Name",
+        "Product_Name",
         "OAC_Code",
         "OAC_Rxn_Name",
         "OAC_SMILES",
