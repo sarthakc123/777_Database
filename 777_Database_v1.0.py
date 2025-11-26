@@ -28,12 +28,17 @@ ID_PAD_WIDTH = 6  # JPM000001
 DEFAULT_CONDITIONS = ["Air", "Glovebox"]
 DEFAULT_BASES = ["LiOH", "BTMG", "TMSOK", "P2Et", "TMSONa", "MTBD", "DBU"]
 DEFAULT_SOLVENTS = ["DMSO", "THF", "1,4-dioxane", "Hexane", "DMF", "2-MeTHF", "Toluene", "Acetone"]
-DEFAULT_CHEMISTS = [("JPM", "John Marin"), ("SD", "Swapna Debnath"), ("CKC", "Chieh-Kai Chan"), ("MDB", "Dr. Martin Burke")]
+DEFAULT_CHEMISTS = [
+    ("JPM", "John Marin"),
+    ("SD", "Swapna Debnath"),
+    ("CKC", "Chieh-Kai Chan"),
+    ("MDB", "Dr. Martin Burke"),
+]
 DEFAULT_COUPLINGS = ["SMC", "BHC", "Amide", "AMC", "Deprotection"]
 MAX_SETS_UI = 4
 
 # =========================
-# Auth helpers (same pattern as SwitchPhos)
+# Auth helpers
 # =========================
 def _auth_enabled() -> bool:
     try:
@@ -49,17 +54,14 @@ def _valid_user(u: str, p: str) -> bool:
         return False
 
 def maybe_set_page_config():
-    """Call set_page_config at most once in this run."""
     if not st.session_state.get("_pc_set"):
         st.set_page_config(page_title=APP_TITLE, page_icon=LOGO_FILE, layout="wide")
         st.session_state["_pc_set"] = True
 
 def require_login_first_page():
-    """Show login screen (first page) and stop the script until authenticated."""
     if not _auth_enabled():
-        return  # no auth gate
+        return  # no auth
 
-    # Already authenticated?
     if st.session_state.get("auth_user"):
         with st.sidebar:
             st.success(f"Signed in as {st.session_state['auth_user']}")
@@ -67,7 +69,6 @@ def require_login_first_page():
                 st.session_state.pop("auth_user", None)
         return
 
-    # Not authenticated yet: render the login page and stop
     maybe_set_page_config()
     col1, col2, col3 = st.columns([1, 2, 1])
     with col2:
@@ -96,7 +97,6 @@ maybe_set_page_config()
 # =========================
 @st.cache_resource(show_spinner=False)
 def get_supabase() -> Tuple[str, Dict[str, str]]:
-    """Initialize Supabase REST API client (SwitchPhos-style)."""
     try:
         url = st.secrets["supabase"]["url"]
         key = st.secrets["supabase"]["anon_key"]
@@ -107,7 +107,6 @@ def get_supabase() -> Tuple[str, Dict[str, str]]:
             "Content-Type": "application/json",
         }
 
-        # Test connection on chemists table
         r = requests.get(f"{url}/rest/v1/chemists?select=initials&limit=1", headers=headers, timeout=30)
         if r.status_code in (200, 206):
             return url, headers
@@ -127,7 +126,6 @@ def sb_request(
     json_body: Optional[dict] = None,
     params: Optional[dict] = None,
 ) -> Any:
-    """Generic Supabase PostgREST wrapper."""
     url, headers = get_supabase()
     full = f"{url}/rest/v1/{endpoint}"
     hdrs = headers.copy()
@@ -169,7 +167,6 @@ def add_chemist(initials: str, full_name: str) -> bool:
     return res is not None
 
 def next_reaction_index(initials: str) -> int:
-    """Get next reaction index for given chemist initials."""
     res = sb_request(
         "GET",
         "reactions",
@@ -195,7 +192,7 @@ def insert_reaction_with_sets(
     oligomer_type: Optional[str],
     sets: List[dict],
     comments: Optional[str] = None,
-    submission_id: Optional[str] = None,   # 🔹 NEW
+    submission_id: Optional[str] = None,
 ) -> bool:
     """Insert one reaction + its condition sets."""
     try:
@@ -210,7 +207,7 @@ def insert_reaction_with_sets(
             "rxn_scale_mol": rxn_scale_mol,
             "created_at": datetime.utcnow().isoformat(),
             "comments": comments,
-            "submission_id": submission_id,   # 🔹 NEW
+            "submission_id": submission_id,
         }
         rx_res = sb_request("POST", "reactions", json_body=reaction_data)
         if not rx_res:
@@ -247,7 +244,6 @@ def insert_reaction_with_sets(
     except Exception as e:
         st.error(f"Error in insert_reaction_with_sets for {rid}: {e}")
         return False
-
 
 # =========================
 # Helper Functions
@@ -363,7 +359,7 @@ with st.sidebar:
     st.header("Export (consolidated)")
 
 # =========================
-# Tabs: [New Reaction, Recent Submissions]
+# Tabs
 # =========================
 tab_new, tab_recent = st.tabs(["Add Reaction", "Recent Submissions"])
 
@@ -376,12 +372,14 @@ with tab_new:
         preview_id = format_reaction_id(selected_initials, next_idx)
         st.info(f"Next ID will be **{preview_id}** for chemist **{selected_initials}**.")
 
-        st.markdown("#### S/E/C Blocks — paste SMILES or upload MOL/SDF")
+        st.markdown("#### S/E/C Blocks")
 
         def smiles_block(label_key: str):
             colA, colB, colC = st.columns([2, 1, 1])
             smi = colA.text_input(f"{label_key} SMILES", key=f"{label_key}_txt")
-            uploaded = colB.file_uploader(f"Upload {label_key} (.mol/.sdf)", type=["mol", "sdf"], key=f"{label_key}_file")
+            uploaded = colB.file_uploader(
+                f"Upload {label_key} (.mol/.sdf)", type=["mol", "sdf"], key=f"{label_key}_file"
+            )
             if uploaded:
                 if RDKit_AVAILABLE:
                     with tempfile.NamedTemporaryFile(delete=False, suffix=Path(uploaded.name).suffix) as tf:
@@ -434,7 +432,6 @@ with tab_new:
         oligomer_type = "dimer" if block_count == 2 else "trimer" if block_count == 3 else None
         st.caption(f"Blocks detected: {block_count or 0}. Oligomer: **{oligomer_type or '—'}**.")
 
-
         def condition_set(i: int):
             st.markdown(f"**Condition set {i}**")
             c1, c2, c3 = st.columns(3)
@@ -443,27 +440,27 @@ with tab_new:
                 coupling = st.selectbox(
                     f"Coupling Type {i} *",
                     options=DEFAULT_COUPLINGS,
-                    key=f"cpl_{i}"
+                    key=f"cpl_{i}",
                 )
                 temp = st.number_input(
                     f"Temperature {i} (°C) *",
                     value=25.0,
                     step=0.5,
-                    key=f"temp_{i}"
+                    key=f"temp_{i}",
                 )
                 yrts = st.number_input(
                     f"YRTS {i}",
                     min_value=0.0,
                     value=0.0,
                     step=0.1,
-                    key=f"yrts_{i}"
+                    key=f"yrts_{i}",
                 )
 
             with c2:
                 cond_opt = st.selectbox(
                     f"Condition {i}",
                     options=DEFAULT_CONDITIONS + ["Other…"],
-                    key=f"cond_{i}"
+                    key=f"cond_{i}",
                 )
                 cond = (
                     st.text_input(f"Condition {i} (custom)", key=f"cond_custom_{i}")
@@ -474,7 +471,7 @@ with tab_new:
                 base_opt = st.selectbox(
                     f"Base {i}",
                     options=DEFAULT_BASES + ["Other…"],
-                    key=f"base_{i}"
+                    key=f"base_{i}",
                 )
                 base = (
                     st.text_input(f"Base {i} (custom) *", key=f"base_custom_{i}")
@@ -482,11 +479,10 @@ with tab_new:
                     else base_opt
                 )
 
-                # 🔹 NEW: mode per condition set
                 entry_mode = st.selectbox(
                     f"Mode {i}",
                     options=["Spike", "Tom", "Jerry", "Manual"],
-                    index=3,  # default = Manual
+                    index=3,
                     key=f"mode_{i}",
                 )
 
@@ -496,12 +492,12 @@ with tab_new:
                     min_value=0.0,
                     value=0.0,
                     step=0.25,
-                    key=f"time_{i}"
+                    key=f"time_{i}",
                 )
                 solv_opt = st.selectbox(
                     f"Solvent {i}",
                     options=DEFAULT_SOLVENTS + ["Other…"],
-                    key=f"solv_{i}"
+                    key=f"solv_{i}",
                 )
                 solv = (
                     st.text_input(f"Solvent {i} (custom) *", key=f"solv_custom_{i}")
@@ -515,7 +511,7 @@ with tab_new:
                     max_value=100.0,
                     value=0.0,
                     step=0.1,
-                    key=f"assay_{i}"
+                    key=f"assay_{i}",
                 )
                 purity = st.number_input(
                     f"Purity {i} (%)",
@@ -523,7 +519,7 @@ with tab_new:
                     max_value=100.0,
                     value=0.0,
                     step=0.1,
-                    key=f"purity_{i}"
+                    key=f"purity_{i}",
                 )
 
             return {
@@ -537,9 +533,8 @@ with tab_new:
                 "yrts": None if yrts == 0.0 else float(yrts),
                 "assay_yield": None if assay_yield == 0.0 else float(assay_yield),
                 "purity_pct": None if purity == 0.0 else float(purity),
-                "entry_mode": entry_mode,  # 🔹 NEW
+                "entry_mode": entry_mode,
             }
-
 
         sets: List[dict] = []
         for i in range(1, repeats + 1):
@@ -563,7 +558,11 @@ with tab_new:
             format="%f",
             key="rxn_scale_mol",
         )
-        comments = st.text_area("Comments (optional)", help="Notes, observations, yields, deviations, etc.", key="comments")
+        comments = st.text_area(
+            "Comments (optional)",
+            help="Notes, observations, yields, deviations, etc.",
+            key="comments",
+        )
 
         # Validation
         errors = []
@@ -588,7 +587,6 @@ with tab_new:
                 for e in errors:
                     st.error(e)
             else:
-                # Build S/E/C positional lists from single fields + multi-SEC blocks
                 S_list = ([canonicalize_smiles(s_smi)] if s_smi else []) + _canonical_list_lines(s_multi.strip())
                 E_list = ([canonicalize_smiles(e_smi)] if e_smi else []) + _canonical_list_lines(e_multi.strip())
                 C_list = ([canonicalize_smiles(c_smi)] if c_smi else []) + _canonical_list_lines(c_multi.strip())
@@ -618,10 +616,6 @@ with tab_new:
                 base_idx = next_reaction_index(selected_initials)
                 saved, failures = 0, 0
 
-                base_idx = next_reaction_index(selected_initials)
-                saved, failures = 0, 0
-
-                # 🔹 NEW: one submission ID for this entire form submit
                 batch_id = str(uuid.uuid4())
 
                 for offset, (s_val, e_val, c_val, exp_val) in enumerate(rows):
@@ -640,7 +634,7 @@ with tab_new:
                         oligomer_type=oligo,
                         sets=sets,
                         comments=comments or None,
-                        submission_id=batch_id,  # 🔹 NEW (same for all rows in this submit)
+                        submission_id=batch_id,
                     )
 
                     if ok:
@@ -649,29 +643,38 @@ with tab_new:
                         failures += 1
 
                 if saved:
-                    st.success(f"Saved **{saved}** reaction(s) (positional SEC + Expected) with the same condition set(s).")
+                    st.success(
+                        f"Saved **{saved}** reaction(s) (positional SEC + Expected) "
+                        f"with the same condition set(s)."
+                    )
                     st.balloons()
                 if failures:
                     st.warning(f"{failures} reaction(s) failed to save. Check data/RLS and try again.")
 
 # ----- TAB 2: Recent Submissions -----
 with tab_recent:
-    st.subheader("Recent submissions (consolidated)")
+    st.subheader("Recent submissions")
 
-    # If you created the `reactions_flat` view, you can just:
-    # flat = sb_request("GET", "reactions_flat", params={"select": "*", "order": "created_at.desc", "limit": 200}) or []
-    # df_join = pd.DataFrame(flat)
-
-    # Otherwise: same logic as your original code (two tables + merge)
-    rx_cols = "id,chemist_initials,oligomer_type,s_block_smiles,e_block_smiles," \
-              "c_block_smiles,expected_smiles,rxn_scale_mol,comments,created_at"
+    rx_cols = (
+        "id,chemist_initials,oligomer_type,"
+        "s_block_smiles,e_block_smiles,c_block_smiles,"
+        "expected_smiles,rxn_scale_mol,comments,created_at"
+    )
     rc_cols = (
         "reaction_id,set_index,coupling_type,temperature_c,condition,base,"
         "time_hours,solvent,yrts,assay_yield,purity_pct,entry_mode"
     )
 
-    rx = sb_request("GET", "reactions", params={"select": rx_cols, "order": "created_at.desc", "limit": 200}) or []
-    rc = sb_request("GET", "reaction_conditions", params={"select": rc_cols, "order": "reaction_id,set_index"}) or []
+    rx = sb_request(
+        "GET",
+        "reactions",
+        params={"select": rx_cols, "order": "created_at.desc", "limit": 200},
+    ) or []
+    rc = sb_request(
+        "GET",
+        "reaction_conditions",
+        params={"select": rc_cols, "order": "reaction_id,set_index"},
+    ) or []
 
     df_rx = pd.DataFrame(rx)
     df_rc = pd.DataFrame(rc)
@@ -679,7 +682,16 @@ with tab_recent:
     if df_rx.empty:
         st.info("No reactions yet. Add your first one in the other tab.")
     else:
-        for col in ["reaction_id", "set_index", "coupling_type", "temperature_c", "condition", "base", "time_hours", "solvent"]:
+        for col in [
+            "reaction_id",
+            "set_index",
+            "coupling_type",
+            "temperature_c",
+            "condition",
+            "base",
+            "time_hours",
+            "solvent",
+        ]:
             if col not in df_rc.columns:
                 df_rc[col] = pd.Series(dtype="object")
 
@@ -693,36 +705,51 @@ with tab_recent:
         )
 
         cols = [
-            "id", "chemist_initials", "oligomer_type",
-            "set_index", "coupling_type", "temperature_c",
-            "base", "solvent", "time_hours", "condition",
-            "yrts", "assay_yield", "purity_pct", "entry_mode",
-            "rxn_scale_mol", "comments", "created_at",
-            "s_block_smiles", "e_block_smiles", "c_block_smiles",
+            "id",
+            "chemist_initials",
+            "oligomer_type",
+            "set_index",
+            "coupling_type",
+            "temperature_c",
+            "base",
+            "solvent",
+            "time_hours",
+            "condition",
+            "yrts",
+            "assay_yield",
+            "purity_pct",
+            "entry_mode",
+            "rxn_scale_mol",
+            "comments",
+            "created_at",
+            "s_block_smiles",
+            "e_block_smiles",
+            "c_block_smiles",
             "expected_smiles",
         ]
-
         cols = [c for c in cols if c in df_join.columns]
 
-        df_join = df_join[cols].rename(columns={
-            "id": "ID",
-            "chemist_initials": "Chemist",
-            "oligomer_type": "Oligomer",
-            "set_index": "Set",
-            "coupling_type": "Coupling",
-            "temperature_c": "Temp_C",
-            "time_hours": "Time_h",
-            "yrts": "YRTS",
-            "assay_yield": "Assay_Yield_pct",
-            "purity_pct": "Purity_pct",
-            "rxn_scale_mol": "Scale_mol",
-            "created_at": "Created_UTC",
-            "s_block_smiles": "S_SMILES",
-            "e_block_smiles": "E_SMILES",
-            "c_block_smiles": "C_SMILES",
-            "expected_smiles": "Expected_SMILES",
-            "entry_mode": "Machine"
-        })
+        df_join = df_join[cols].rename(
+            columns={
+                "id": "ID",
+                "chemist_initials": "Chemist",
+                "oligomer_type": "Oligomer",
+                "set_index": "Set",
+                "coupling_type": "Coupling",
+                "temperature_c": "Temp_C",
+                "time_hours": "Time_h",
+                "yrts": "YRTS",
+                "assay_yield": "Assay_Yield_pct",
+                "purity_pct": "Purity_pct",
+                "entry_mode": "Mode",
+                "rxn_scale_mol": "Scale_mol",
+                "created_at": "Created_UTC",
+                "s_block_smiles": "S_SMILES",
+                "e_block_smiles": "E_SMILES",
+                "c_block_smiles": "C_SMILES",
+                "expected_smiles": "Expected_SMILES",
+            }
+        )
 
         st.dataframe(df_join, use_container_width=True, hide_index=True)
 
@@ -749,69 +776,84 @@ with tab_recent:
 # ALWAYS-VISIBLE CONSOLIDATED TABLE (bottom of page)
 # =========================================================
 st.markdown("---")
-st.subheader("All Reactions (Consolidated View)")
+st.subheader("All Reactions")
 
-# Columns we want to fetch
-rx_cols = (
+rx_cols_all = (
     "id,chemist_initials,oligomer_type,"
     "s_block_smiles,e_block_smiles,c_block_smiles,"
     "expected_smiles,rxn_scale_mol,comments,created_at"
 )
-rc_cols = (
+rc_cols_all = (
     "reaction_id,set_index,coupling_type,temperature_c,condition,base,"
-    "time_hours,solvent,yrts,assay_yield,purity_pct"
+    "time_hours,solvent,yrts,assay_yield,purity_pct,entry_mode"
 )
 
-# Fetch from Supabase
-rx = sb_request(
+rx_all = sb_request(
     "GET",
     "reactions",
-    params={"select": rx_cols, "order": "created_at.desc", "limit": 200},
+    params={"select": rx_cols_all, "order": "created_at.desc", "limit": 200},
 ) or []
 
-rc = sb_request(
+rc_all = sb_request(
     "GET",
     "reaction_conditions",
-    params={"select": rc_cols, "order": "reaction_id,set_index"},
+    params={"select": rc_cols_all, "order": "reaction_id,set_index"},
 ) or []
 
-df_rx = pd.DataFrame(rx)
-df_rc = pd.DataFrame(rc)
+df_rx_all = pd.DataFrame(rx_all)
+df_rc_all = pd.DataFrame(rc_all)
 
-if df_rx.empty:
+if df_rx_all.empty:
     st.info("No reactions recorded yet.")
 else:
-    # Ensure rc columns exist
     for col in [
-        "reaction_id","set_index","coupling_type","temperature_c",
-        "condition","base","time_hours","solvent"
+        "reaction_id",
+        "set_index",
+        "coupling_type",
+        "temperature_c",
+        "condition",
+        "base",
+        "time_hours",
+        "solvent",
     ]:
-        if col not in df_rc.columns:
-            df_rc[col] = pd.Series(dtype="object")
+        if col not in df_rc_all.columns:
+            df_rc_all[col] = pd.Series(dtype="object")
 
-    # Merge (expands into 1 row per condition set)
-    df_join = pd.merge(
-        df_rx,
-        df_rc,
+    df_join_all = pd.merge(
+        df_rx_all,
+        df_rc_all,
         left_on="id",
         right_on="reaction_id",
         how="left",
         sort=False,
     )
 
-    # Column ordering
-    cols = [
-        "id", "chemist_initials", "oligomer_type",
-        "set_index", "coupling_type", "temperature_c",
-        "base", "solvent", "time_hours", "condition",
-        "yrts", "assay_yield", "purity_pct",
-        "rxn_scale_mol", "comments", "created_at",
-        "s_block_smiles", "e_block_smiles", "c_block_smiles",
+    cols_all = [
+        "id",
+        "chemist_initials",
+        "oligomer_type",
+        "set_index",
+        "coupling_type",
+        "temperature_c",
+        "base",
+        "solvent",
+        "time_hours",
+        "condition",
+        "yrts",
+        "assay_yield",
+        "purity_pct",
+        "entry_mode",
+        "rxn_scale_mol",
+        "comments",
+        "created_at",
+        "s_block_smiles",
+        "e_block_smiles",
+        "c_block_smiles",
         "expected_smiles",
     ]
-    cols = [c for c in cols if c in df_join.columns]
+    cols_all = [c for c in cols_all if c in df_join_all.columns]
 
-    df_view = df_join[cols].rename(
+    df_view = df_join_all[cols_all].rename(
         columns={
             "id": "ID",
             "chemist_initials": "Chemist",
@@ -823,7 +865,7 @@ else:
             "yrts": "YRTS",
             "assay_yield": "Assay_Yield_pct",
             "purity_pct": "Purity_pct",
-            "entry_mode": "Mode",  # 🔹 NEW
+            "entry_mode": "Mode",
             "rxn_scale_mol": "Scale_mol",
             "created_at": "Created_UTC",
             "s_block_smiles": "S_SMILES",
@@ -835,7 +877,6 @@ else:
 
     st.dataframe(df_view, use_container_width=True, hide_index=True)
 
-    # Export as CSV
     st.download_button(
         "Download all reactions (CSV)",
         df_view.to_csv(index=False).encode("utf-8"),
