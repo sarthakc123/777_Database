@@ -281,18 +281,32 @@ def molfile_to_smiles(path: str) -> Optional[str]:
     except Exception:
         return None
 
-def smiles_image_bytes(smiles: str, size: Tuple[int, int] = (280, 280)) -> Optional[bytes]:
-    if not (RDKit_AVAILABLE and smiles):
+def smiles_image_bytes(smiles: str, size=(280, 280)) -> Optional[bytes]:
+    """Render SMILES using RDKit if available, otherwise use NCI Cactus API."""
+    if not smiles:
         return None
+
+    # Attempt RDKit first (local dev)
+    if RDKit_AVAILABLE:
+        try:
+            mol = Chem.MolFromSmiles(smiles)
+            if mol:
+                img = Draw.MolToImage(mol, size=size)
+                buf = io.BytesIO()
+                img.save(buf, format="PNG")
+                return buf.getvalue()
+        except:
+            pass
+
+    # FALLBACK: NCI CACTUS API
     try:
-        mol = Chem.MolFromSmiles(smiles)
-        if not mol:
+        url = f"https://cactus.nci.nih.gov/chemical/structure/{smiles}/image"
+        r = requests.get(url, timeout=10)
+        if r.status_code == 200:
+            return r.content
+        else:
             return None
-        img = Draw.MolToImage(mol, size=size)
-        buf = io.BytesIO()
-        img.save(buf, format="PNG")
-        return buf.getvalue()
-    except Exception:
+    except:
         return None
 
 def _canonical_list_lines(txt: str) -> list:
