@@ -8,6 +8,7 @@ from pathlib import Path
 
 import streamlit as st
 import pandas as pd
+import uuid
 
 # ---------- Optional RDKit ----------
 try:
@@ -194,6 +195,7 @@ def insert_reaction_with_sets(
     oligomer_type: Optional[str],
     sets: List[dict],
     comments: Optional[str] = None,
+    submission_id: Optional[str] = None,   # 🔹 NEW
 ) -> bool:
     """Insert one reaction + its condition sets."""
     try:
@@ -208,6 +210,7 @@ def insert_reaction_with_sets(
             "rxn_scale_mol": rxn_scale_mol,
             "created_at": datetime.utcnow().isoformat(),
             "comments": comments,
+            "submission_id": submission_id,   # 🔹 NEW
         }
         rx_res = sb_request("POST", "reactions", json_body=reaction_data)
         if not rx_res:
@@ -227,7 +230,7 @@ def insert_reaction_with_sets(
                 "yrts": cs.get("yrts"),
                 "assay_yield": cs.get("assay_yield"),
                 "purity_pct": cs.get("purity_pct"),
-                "entry_mode": cs.get("entry_mode"),  # 🔹 NEW
+                "entry_mode": cs.get("entry_mode"),
             }
 
             condition_result = sb_request(
@@ -244,6 +247,7 @@ def insert_reaction_with_sets(
     except Exception as e:
         st.error(f"Error in insert_reaction_with_sets for {rid}: {e}")
         return False
+
 
 # =========================
 # Helper Functions
@@ -614,6 +618,12 @@ with tab_new:
                 base_idx = next_reaction_index(selected_initials)
                 saved, failures = 0, 0
 
+                base_idx = next_reaction_index(selected_initials)
+                saved, failures = 0, 0
+
+                # 🔹 NEW: one submission ID for this entire form submit
+                batch_id = str(uuid.uuid4())
+
                 for offset, (s_val, e_val, c_val, exp_val) in enumerate(rows):
                     rid = format_reaction_id(selected_initials, base_idx + offset)
                     present = sum(1 for x in [s_val, e_val, c_val] if x)
@@ -630,7 +640,9 @@ with tab_new:
                         oligomer_type=oligo,
                         sets=sets,
                         comments=comments or None,
+                        submission_id=batch_id,  # 🔹 NEW (same for all rows in this submit)
                     )
+
                     if ok:
                         saved += 1
                     else:
@@ -830,48 +842,4 @@ else:
         "all_reactions_consolidated.csv",
         "text/csv",
         key="download_always_visible",
-    )
-
-# =========================================================
-# ALWAYS-VISIBLE CONSOLIDATED TABLE (one row per reaction)
-# =========================================================
-st.markdown("---")
-st.subheader("All Reactions (Collapsed View)")
-
-flat = sb_request(
-    "GET",
-    "reactions_flat_json",
-    params={"select": "*", "order": "created_at.desc"},
-) or []
-
-df_flat = pd.DataFrame(flat)
-
-if df_flat.empty:
-    st.info("No reactions recorded yet.")
-else:
-    # Nice column names for reaction-level fields
-    df_flat = df_flat.rename(
-        columns={
-            "id": "ID",
-            "chemist_initials": "Chemist",
-            "oligomer_type": "Oligomer",
-            "rxn_scale_mol": "Scale_mol",
-            "comments": "Comments",
-            "created_at": "Created_UTC",
-            "s_block_smiles": "S_SMILES",
-            "e_block_smiles": "E_SMILES",
-            "c_block_smiles": "C_SMILES",
-            "expected_smiles": "Expected_SMILES",
-            "condition_sets": "Condition_Sets",  # JSON array of all sets
-        }
-    )
-
-    st.dataframe(df_flat, use_container_width=True, hide_index=True)
-
-    st.download_button(
-        "Download all reactions (collapsed, JSON sets)",
-        df_flat.to_csv(index=False).encode("utf-8"),
-        "all_reactions_collapsed.csv",
-        "text/csv",
-        key="download_collapsed",
     )
