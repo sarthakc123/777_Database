@@ -4,7 +4,7 @@ pandas
 numpy
 
 # Optional but recommended (file→SMILES + previews)
-rdkit
+rdkit-pypi==2022.9.5
 pillow
 SQLAlchemy>=2.0
 psycopg2-binary>=2.9
