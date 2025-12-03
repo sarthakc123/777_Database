@@ -386,6 +386,7 @@ with st.sidebar:
 tab_new, tab_recent = st.tabs(["Add Reaction", "Recent Submissions"])
 
 # ----- TAB 1: Add Reaction -----
+# ----- TAB 1: Add Reaction -----
 with tab_new:
     st.subheader("Add a reaction")
 
@@ -399,12 +400,15 @@ with tab_new:
         def smiles_block(label_key: str):
             colA, colB, colC = st.columns([2, 1, 1])
             smi = colA.text_input(f"{label_key} SMILES", key=f"{label_key}_txt")
+
             uploaded = colB.file_uploader(
                 f"Upload {label_key} (.mol/.sdf)", type=["mol", "sdf"], key=f"{label_key}_file"
             )
             if uploaded:
                 if RDKit_AVAILABLE:
-                    with tempfile.NamedTemporaryFile(delete=False, suffix=Path(uploaded.name).suffix) as tf:
+                    # Use a temp file that deletes itself
+                    suffix = Path(uploaded.name).suffix
+                    with tempfile.NamedTemporaryFile(delete=True, suffix=suffix) as tf:
                         tf.write(uploaded.getvalue())
                         tf.flush()
                         smi_conv = molfile_to_smiles(tf.name)
@@ -415,6 +419,7 @@ with tab_new:
                         st.warning(f"{label_key}: Could not parse file to SMILES.")
                 else:
                     st.warning("RDKit not installed, paste SMILES instead.")
+
             smi = canonicalize_smiles(smi)
             if smi:
                 img = smiles_image_bytes(smi)
@@ -424,18 +429,12 @@ with tab_new:
                     except Exception:
                         st.warning(f"Could not render preview for {label_key} (invalid image).")
 
+            return smi  # 🔴 IMPORTANT: return the SMILES
 
+        # Single S/E/C triplet
         s_smi = smiles_block("S-Block")
         e_smi = smiles_block("E-Block")
         c_smi = smiles_block("C-Block")
-
-        with st.expander("Add multiple SEC variants (positional pairing)"):
-            st.caption("Enter extra variants, one per line (Sₙ pairs with Eₙ and Cₙ).")
-            s_multi = st.text_area("Extra S variants (one per line)", key="s_multi_pos")
-            e_multi = st.text_area("Extra E variants (one per line)", key="e_multi_pos")
-            c_multi = st.text_area("Extra C variants (one per line)", key="c_multi_pos")
-
-        st.markdown("---")
 
         # Number of condition sets (1..4)
         if "num_sets" not in st.session_state:
@@ -452,7 +451,7 @@ with tab_new:
             st.rerun()
         repeats = st.session_state["num_sets"]
 
-        # Oligomer flag
+        # Oligomer flag based on single S/E/C
         block_count = sum(1 for x in [s_smi, e_smi, c_smi] if x)
         oligomer_type = "dimer" if block_count == 2 else "trimer" if block_count == 3 else None
         st.caption(f"Blocks detected: {block_count or 0}. Oligomer: **{oligomer_type or '—'}**.")
@@ -498,11 +497,14 @@ with tab_new:
                     options=DEFAULT_BASES + ["Other…"],
                     key=f"base_{i}",
                 )
-                base = (
-                    st.text_input(f"Base {i} (custom) *", key=f"base_custom_{i}")
-                    if base_opt == "Other…"
-                    else base_opt
+
+                base_custom = st.text_input(
+                    f"Base {i} (custom if 'Other…') *",
+                    key=f"base_custom_{i}",
+                    disabled=base_opt != "Other…",
                 )
+
+                base = base_custom.strip() if base_opt == "Other…" else base_opt
 
                 entry_mode = st.selectbox(
                     f"Mode {i}",
@@ -524,11 +526,14 @@ with tab_new:
                     options=DEFAULT_SOLVENTS + ["Other…"],
                     key=f"solv_{i}",
                 )
-                solv = (
-                    st.text_input(f"Solvent {i} (custom) *", key=f"solv_custom_{i}")
-                    if solv_opt == "Other…"
-                    else solv_opt
+
+                solv_custom = st.text_input(
+                    f"Solvent {i} (custom if 'Other…') *",
+                    key=f"solv_custom_{i}",
+                    disabled=solv_opt != "Other…",
                 )
+
+                solv = solv_custom.strip() if solv_opt == "Other…" else solv_opt
 
                 assay_yield = st.number_input(
                     f"Assay Yield {i} (%)",
@@ -561,6 +566,7 @@ with tab_new:
                 "entry_mode": entry_mode,
             }
 
+        # Build condition sets
         sets: List[dict] = []
         for i in range(1, repeats + 1):
             if i > 1:
@@ -569,18 +575,20 @@ with tab_new:
 
         st.markdown("---")
 
-        expected_list_raw = st.text_area(
-            "Expected compound SMILES (one per line; maps to row n) *",
-            help="Line n corresponds to Sₙ/Eₙ/Cₙ. Leave a line blank to set None for that row.",
-            key="expected_smiles_list",
+        # Single expected product SMILES (no multi-variants)
+        expected_smi_raw = st.text_input(
+            "Expected product SMILES *",
+            help="Canonical SMILES of the desired product.",
+            key="expected_smiles_single",
         )
-        EXP_list = _canonical_list_lines(expected_list_raw.strip())
+        expected_smi = canonicalize_smiles(expected_smi_raw.strip()) if expected_smi_raw else None
+
         rxn_scale_mol = st.number_input(
             "RXN_Scale (mol) *",
             min_value=0.0,
-            value=None,
+            value=0.1,
             step=0.001,
-            format="%f",
+            format="%.3f",
             key="rxn_scale_mol",
         )
         comments = st.text_area(
@@ -591,8 +599,10 @@ with tab_new:
 
         # Validation
         errors = []
-        if not any([s_smi, e_smi, c_smi]) and not any([s_multi, e_multi, c_multi]):
-            errors.append("Provide at least one of S/E/C block SMILES (single or multi-SEC).")
+        if not any([s_smi, e_smi, c_smi]):
+            errors.append("Provide at least one of S/E/C block SMILES.")
+        if not expected_smi:
+            errors.append("Expected product SMILES is required.")
         if rxn_scale_mol is None or rxn_scale_mol <= 0:
             errors.append("RXN_Scale (mol) must be > 0.")
         for i, cs in enumerate(sets, start=1):
@@ -612,69 +622,32 @@ with tab_new:
                 for e in errors:
                     st.error(e)
             else:
-                S_list = ([canonicalize_smiles(s_smi)] if s_smi else []) + _canonical_list_lines(s_multi.strip())
-                E_list = ([canonicalize_smiles(e_smi)] if e_smi else []) + _canonical_list_lines(e_multi.strip())
-                C_list = ([canonicalize_smiles(c_smi)] if c_smi else []) + _canonical_list_lines(c_multi.strip())
+                # Compute oligomer again with final S/E/C
+                present = sum(1 for x in [s_smi, e_smi, c_smi] if x)
+                oligo = "dimer" if present == 2 else ("trimer" if present == 3 else None)
 
-                if not (S_list or E_list or C_list):
-                    st.error("No SEC variants to save.")
-                    st.stop()
-
-                n = max(len(S_list), len(E_list), len(C_list))
-                if len(EXP_list) != n:
-                    st.error(f"Expected list length ({len(EXP_list)}) must match the number of SEC rows ({n}).")
-                    st.stop()
-
-                rows = []
-                for i in range(n):
-                    s_val = S_list[i] if i < len(S_list) else None
-                    e_val = E_list[i] if i < len(E_list) else None
-                    c_val = C_list[i] if i < len(C_list) else None
-                    exp_val = EXP_list[i]
-                    if any([s_val, e_val, c_val]):
-                        rows.append((s_val, e_val, c_val, exp_val))
-
-                if not rows:
-                    st.error("All SEC rows are empty.")
-                    st.stop()
-
-                base_idx = next_reaction_index(selected_initials)
-                saved, failures = 0, 0
-
+                rid = format_reaction_id(selected_initials, next_reaction_index(selected_initials))
                 batch_id = str(uuid.uuid4())
 
-                for offset, (s_val, e_val, c_val, exp_val) in enumerate(rows):
-                    rid = format_reaction_id(selected_initials, base_idx + offset)
-                    present = sum(1 for x in [s_val, e_val, c_val] if x)
-                    oligo = "dimer" if present == 2 else ("trimer" if present == 3 else None)
+                ok = insert_reaction_with_sets(
+                    rid=rid,
+                    initials=selected_initials,
+                    s_smi=s_smi,
+                    e_smi=e_smi,
+                    c_smi=c_smi,
+                    expected_smi=expected_smi,
+                    rxn_scale_mol=float(rxn_scale_mol),
+                    oligomer_type=oligo,
+                    sets=sets,
+                    comments=comments or None,
+                    submission_id=batch_id,
+                )
 
-                    ok = insert_reaction_with_sets(
-                        rid=rid,
-                        initials=selected_initials,
-                        s_smi=s_val,
-                        e_smi=e_val,
-                        c_smi=c_val,
-                        expected_smi=exp_val,
-                        rxn_scale_mol=float(rxn_scale_mol),
-                        oligomer_type=oligo,
-                        sets=sets,
-                        comments=comments or None,
-                        submission_id=batch_id,
-                    )
-
-                    if ok:
-                        saved += 1
-                    else:
-                        failures += 1
-
-                if saved:
-                    st.success(
-                        f"Saved **{saved}** reaction(s) (positional SEC + Expected) "
-                        f"with the same condition set(s)."
-                    )
+                if ok:
+                    st.success(f"Saved reaction **{rid}**.")
                     st.balloons()
-                if failures:
-                    st.warning(f"{failures} reaction(s) failed to save. Check data/RLS and try again.")
+                else:
+                    st.error("Failed to save reaction. Check data/RLS and try again.")
 
 # ----- TAB 2: Recent Submissions -----
 with tab_recent:
