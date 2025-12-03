@@ -638,7 +638,7 @@ with tab_new:
         rxn_scale_mol = st.number_input(
             "RXN_Scale (mol) *",
             min_value=0.0,
-            value=0.1,
+            value=0.025,
             step=0.001,
             format="%.3f",
             key="rxn_scale_mol",
