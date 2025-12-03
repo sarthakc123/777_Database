@@ -9,6 +9,12 @@ from pathlib import Path
 import streamlit as st
 import pandas as pd
 import uuid
+import secrets
+
+
+# Initialize auth flag in session_state so it survives reruns/refresh
+if "auth_user" not in st.session_state:
+    st.session_state["auth_user"] = None
 
 # ---------- Optional RDKit ----------
 try:
@@ -59,17 +65,43 @@ def maybe_set_page_config():
         st.session_state["_pc_set"] = True
 
 def require_login_first_page():
+    # If auth is disabled, skip everything
     if not _auth_enabled():
-        return  # no auth
+        return
 
+    maybe_set_page_config()
+
+    # 1️⃣ Try to restore user from URL param if not already in session_state
+    if not st.session_state.get("auth_user"):
+        try:
+            # Newer Streamlit: st.query_params is dict-like
+            params = st.query_params
+        except TypeError:
+            # Older fallback
+            params = st.experimental_get_query_params()
+
+        user_param = params.get("user")
+        if isinstance(user_param, list):
+            user_param = user_param[0]
+
+        if user_param:
+            st.session_state["auth_user"] = user_param
+
+    # 2️⃣ If we now have a logged-in user, show sidebar + allow logout
     if st.session_state.get("auth_user"):
         with st.sidebar:
             st.success(f"Signed in as {st.session_state['auth_user']}")
             if st.button("Log out", key="logout_btn"):
-                st.session_state.pop("auth_user", None)
+                st.session_state["auth_user"] = None
+                # Clear query params on logout
+                try:
+                    st.query_params.clear()
+                except Exception:
+                    st.experimental_set_query_params()
+                st.rerun()
         return
 
-    maybe_set_page_config()
+    # 3️⃣ Not logged in yet → show login UI
     col1, col2, col3 = st.columns([1, 2, 1])
     with col2:
         st.image(LOGO_FILE, use_container_width=True)
@@ -83,14 +115,24 @@ def require_login_first_page():
 
         if ok:
             if _valid_user(u.strip(), p):
-                st.session_state["auth_user"] = u.strip()
+                username = u.strip()
+                st.session_state["auth_user"] = username
+
+                # 🔐 Put the username into the URL so refresh can restore it
+                try:
+                    st.query_params["user"] = username
+                except Exception:
+                    st.experimental_set_query_params(user=username)
+
+                st.rerun()  # rerun app in logged-in state
             else:
                 st.error("Invalid credentials.")
     st.stop()
 
+
 # Gate the app
 require_login_first_page()
-maybe_set_page_config()
+#maybe_set_page_config()
 
 # =========================
 # Supabase REST API Setup
