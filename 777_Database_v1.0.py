@@ -290,6 +290,9 @@ def insert_reaction_with_sets(
 # =========================
 # Helper Functions
 # =========================
+def _mark_changed():
+    st.session_state["trigger_rerun"] = True
+
 def format_reaction_id(initials: str, n: int, width: int = ID_PAD_WIDTH) -> str:
     return f"{initials}{n:0{width}d}"
 
@@ -498,6 +501,7 @@ with tab_new:
         oligomer_type = "dimer" if block_count == 2 else "trimer" if block_count == 3 else None
         st.caption(f"Blocks detected: {block_count or 0}. Oligomer: **{oligomer_type or '—'}**.")
 
+
         def condition_set(i: int):
             st.markdown(f"**Condition set {i}**")
             c1, c2, c3 = st.columns(3)
@@ -523,17 +527,21 @@ with tab_new:
                 )
 
             with c2:
+                # ----- Condition -----
                 cond_opt = st.selectbox(
                     f"Condition {i}",
                     options=DEFAULT_CONDITIONS + ["Other…"],
                     key=f"cond_{i}",
                 )
-                cond = (
-                    st.text_input(f"Condition {i} (custom)", key=f"cond_custom_{i}")
-                    if cond_opt == "Other…"
-                    else cond_opt
-                )
+                if cond_opt == "Other…":
+                    cond = st.text_input(
+                        f"Condition {i} (custom) *",
+                        key=f"cond_custom_{i}",
+                    )
+                else:
+                    cond = cond_opt
 
+                # ----- Base -----
                 base_opt = st.selectbox(
                     f"Base {i}",
                     options=DEFAULT_BASES + ["Other…"],
@@ -543,7 +551,7 @@ with tab_new:
                 base_custom = st.text_input(
                     f"Base {i} (custom if 'Other…') *",
                     key=f"base_custom_{i}",
-                    disabled=base_opt != "Other…",
+                    placeholder="Enter custom base if you selected Other…",
                 )
 
                 base = base_custom.strip() if base_opt == "Other…" else base_opt
@@ -563,6 +571,8 @@ with tab_new:
                     step=0.25,
                     key=f"time_{i}",
                 )
+
+                # ----- Solvent -----
                 solv_opt = st.selectbox(
                     f"Solvent {i}",
                     options=DEFAULT_SOLVENTS + ["Other…"],
@@ -572,7 +582,7 @@ with tab_new:
                 solv_custom = st.text_input(
                     f"Solvent {i} (custom if 'Other…') *",
                     key=f"solv_custom_{i}",
-                    disabled=solv_opt != "Other…",
+                    placeholder="Enter custom solvent if you selected Other…",
                 )
 
                 solv = solv_custom.strip() if solv_opt == "Other…" else solv_opt
