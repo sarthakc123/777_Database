@@ -281,12 +281,14 @@ def molfile_to_smiles(path: str) -> Optional[str]:
     except Exception:
         return None
 
+from urllib.parse import quote  # add at top
+
 def smiles_image_bytes(smiles: str, size=(280, 280)) -> Optional[bytes]:
     """Render SMILES using RDKit if available, otherwise use NCI Cactus API."""
     if not smiles:
         return None
 
-    # Attempt RDKit first (local dev)
+    # Try RDKit first
     if RDKit_AVAILABLE:
         try:
             mol = Chem.MolFromSmiles(smiles)
@@ -295,19 +297,25 @@ def smiles_image_bytes(smiles: str, size=(280, 280)) -> Optional[bytes]:
                 buf = io.BytesIO()
                 img.save(buf, format="PNG")
                 return buf.getvalue()
-        except:
+        except Exception:
             pass
 
-    # FALLBACK: NCI CACTUS API
+    # Fallback: NCI Cactus API
     try:
-        url = f"https://cactus.nci.nih.gov/chemical/structure/{smiles}/image"
+        safe = quote(smiles, safe="")  # URL-encode the SMILES
+        url = f"https://cactus.nci.nih.gov/chemical/structure/{safe}/image"
         r = requests.get(url, timeout=10)
-        if r.status_code == 200:
+
+        # Make sure we really got an image, not HTML
+        if (
+            r.status_code == 200
+            and r.headers.get("content-type", "").startswith("image/")
+        ):
             return r.content
-        else:
-            return None
-    except:
         return None
+    except Exception:
+        return None
+
 
 def _canonical_list_lines(txt: str) -> list:
     if not txt:
@@ -406,13 +414,16 @@ with tab_new:
                     else:
                         st.warning(f"{label_key}: Could not parse file to SMILES.")
                 else:
-                    st.warning("RDKit not installed — paste SMILES instead.")
+                    st.warning("RDKit not installed, paste SMILES instead.")
             smi = canonicalize_smiles(smi)
             if smi:
                 img = smiles_image_bytes(smi)
                 if img:
-                    colC.image(img, caption=f"{label_key}")
-            return smi
+                    try:
+                        colC.image(img, caption=f"{label_key}")
+                    except Exception:
+                        st.warning(f"Could not render preview for {label_key} (invalid image).")
+
 
         s_smi = smiles_block("S-Block")
         e_smi = smiles_block("E-Block")
